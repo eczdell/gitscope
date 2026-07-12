@@ -446,7 +446,8 @@ draw_report() {
     local out=""
     out+="$CLEAR"
 
-    draw_status_bar out
+    build_status_bar
+    out+="$_SB"
 
     if (( REPORT_EMAIL_MODE )); then
         out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_INPUT}${RST}${DIM}█ Esc to cancel  Tab to select${RST}${NL}"
