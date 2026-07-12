@@ -291,7 +291,7 @@ draw_diff() {
     build_hr
     out+="$_HR"
 
-    local vis=$((TERM_H - 3))
+    local vis=$((TERM_H - 4))
     local total=${#DIFF_LINES[@]}
     local max_s=$((total - vis))
     (( max_s < 0 )) && max_s=0
@@ -348,7 +348,7 @@ draw_files() {
     build_hr
     out+="$_HR"
 
-    local vis=$((TERM_H - 3))
+    local vis=$((TERM_H - 4))
     local total=${#FILES_LINES[@]}
     local max_s=$((total - vis))
     (( max_s < 0 )) && max_s=0
@@ -473,7 +473,7 @@ draw_report() {
     build_hr
     out+="$_HR"
 
-    local vis=$((TERM_H - 3))
+    local vis=$((TERM_H - 4))
     if (( REPORT_EMAIL_MODE )); then
         ((vis--))
         local ac_count=${#REPORT_AC_LIST[@]}
@@ -842,7 +842,7 @@ draw() {
     build_hr
     out+="$_HR"
 
-    local vis=$((TERM_H - 3))
+    local vis=$((TERM_H - 4))
     (( FILTER_MODE )) && ((vis--))
     (( vis < 1 )) && vis=1
 
