@@ -384,10 +384,10 @@ open_report() {
     for _ in $(seq 1 62); do hr2+="-"; done
 
     local data
-    data=$(git log --diff-filter=A --format="%ae|%ad" --date=short --name-only 2>/dev/null | awk -F'|' '
+    data=$(git log --format="%ae|%ad" --date=short --name-only 2>/dev/null | awk -F'|' '
         /^[0-9a-f]{40}\|/ { email=$1; date=$2; next }
         NF && email { print email "|" $0 "|" date; email="" }
-    ' | sort -t"|" -k1,1)
+    ' | sort -u -t"|" -k1,2 | sort -t"|" -k1,1)
 
     [[ -z "$data" ]] && {
         REPORT_LINES+=("  ${DIM}No file data found${RST}")
