@@ -286,10 +286,10 @@ open_diff() {
 draw_diff() {
     local out=""
     out+="$CLEAR"
-
-    draw_status_bar out
-
-    draw_hr out
+    build_status_bar
+    out+="$_SB"
+    build_hr
+    out+="$_HR"
 
     local vis=$((TERM_H - 3))
     local total=${#DIFF_LINES[@]}
@@ -318,7 +318,8 @@ draw_diff() {
     done
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
-    draw_hr out
+    build_hr
+    out+="$_HR"
     out+="  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
@@ -341,9 +342,11 @@ draw_files() {
     local out=""
     out+="$CLEAR"
 
-    draw_status_bar out
+    build_status_bar
+    out+="$_SB"
 
-    draw_hr out
+    build_hr
+    out+="$_HR"
 
     local vis=$((TERM_H - 3))
     local total=${#FILES_LINES[@]}
@@ -368,7 +371,8 @@ draw_files() {
     done
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
-    draw_hr out
+    build_hr
+    out+="$_HR"
     out+="  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
@@ -465,7 +469,8 @@ draw_report() {
         fi
     fi
 
-    draw_hr out
+    build_hr
+    out+="$_HR"
 
     local vis=$((TERM_H - 3))
     if (( REPORT_EMAIL_MODE )); then
@@ -491,7 +496,8 @@ draw_report() {
     done
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
-    draw_hr out
+    build_hr
+    out+="$_HR"
     out+="  ${DIM}j/k${RST} ↕  ${DIM}g/G${RST} top/bot  ${DIM}/${RST} filter  ${DIM}t${RST} sort  ${DIM}b${RST} branch  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
@@ -761,109 +767,55 @@ build_sidebar() {
 # Draw
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Status bar (dwm-style)
-# Usage: local out=""; draw_status_bar out TERM_W CUR_BR ...
-draw_status_bar() {
-    local -n _out=$1
-    local _tw=$TERM_W
-    _out+="${BLD}${CYN} ${RST} ${BLD}${CYN}${REPO_NAME}${RST}"
-    _out+="${DIM} │ ${RST}${BLD}${GRN}${CUR_BR}${RST}"
+_SB="" _HR=""
+build_status_bar() {
+    _SB=""
+    _SB+="${BLD}${CYN} ${RST} ${BLD}${CYN}${REPO_NAME}${RST}"
+    _SB+="${DIM} │ ${RST}${BLD}${GRN}${CUR_BR}${RST}"
 
     local mode_label="tree"
     (( DIFF_MODE ))  && mode_label="diff"
     (( FILES_MODE )) && mode_label="files"
     (( REPORT_MODE )) && mode_label="report"
 
-    _out+="${DIM} │ ${RST}${BLD}${WHT}${TOTAL}${RST}${DIM} commits${RST}"
-    _out+="${DIM} │ ${RST}${BLD}${LCY}${mode_label}${RST}"
+    _SB+="${DIM} │ ${RST}${BLD}${WHT}${TOTAL}${RST}${DIM} commits${RST}"
+    _SB+="${DIM} │ ${RST}${BLD}${LCY}${mode_label}${RST}"
 
     if [[ -n "$FILTER_TEXT" ]]; then
-        _out+="${DIM} │ ${RST}${BLD}${LGR}/${RST}${FILTER_TEXT}"
+        _SB+="${DIM} │ ${RST}${BLD}${LGR}/${RST}${FILTER_TEXT}"
     fi
 
     if [[ -n "$DATE_FROM" || -n "$DATE_TO" ]]; then
-        _out+="${DIM} │ ${RST}${BLD}${LCY}📅${RST} ${DATE_FROM:-..}→${DATE_TO:-..}"
+        _SB+="${DIM} │ ${RST}${BLD}${LCY}📅${RST} ${DATE_FROM:-..}→${DATE_TO:-..}"
     fi
 
     if [[ -n "$DESCENDANT_FILTER" ]]; then
-        _out+="${DIM} │ ${RST}${BLD}${LYL}▼${RST} zoom:${DESCENDANT_FILTER:0:7}"
+        _SB+="${DIM} │ ${RST}${BLD}${LYL}▼${RST} zoom:${DESCENDANT_FILTER:0:7}"
     fi
 
     if (( SHOW_ALL )); then
-        _out+="${DIM} │ ${RST}${LYL}${BLD}ALL${RST}"
+        _SB+="${DIM} │ ${RST}${LYL}${BLD}ALL${RST}"
     fi
     if (( SHOW_META )); then
-        _out+="${DIM} │ ${RST}${LYL}${BLD}META${RST}"
+        _SB+="${DIM} │ ${RST}${LYL}${BLD}META${RST}"
     fi
     if (( COMPACT )); then
-        _out+="${DIM} │ ${RST}${LYL}${BLD}CMP${RST}"
+        _SB+="${DIM} │ ${RST}${LYL}${BLD}CMP${RST}"
     fi
 
-    local used=${#_out}
-    local fill=$((_tw - used))
-    (( fill > 0 )) && _out+=$(printf '%*s' $fill '')
+    local used=${#_SB}
+    local fill=$((TERM_W - used))
+    (( fill > 0 )) && _SB+=$(printf '%*s' $fill '')
 
-    _out+="${NL}"
+    _SB+="${NL}"
 }
 
-# Draw separator line
-draw_hr() {
-    local -n _out=$1
+build_hr() {
     local hr=""
     for _ in $(seq 1 $TERM_W); do hr+="─"; done
-    _out+="${DIM}${hr}${RST}${NL}"
+    _HR="${DIM}${hr}${RST}${NL}"
 }
 
-# Draw content with sidebar (used by tree mode)
-draw_content_with_sidebar() {
-    local -n _out=$1
-    local vis=$2
-
-    build_sidebar "$vis"
-
-    local drawn=0
-    local vl="${DIM}│${RST}"
-    for ((idx=SCROLL; idx<RENDER_N && drawn<vis; idx++)); do
-        local tl; tl=$(pad_to "${RENDER[$idx]}" "$TREE_W")
-        if (( idx == CURSOR )); then
-            tl="${YEL}▸${tl:7}${RST}"
-        fi
-        local sl="${SIDEBAR_LINES[$drawn]:-}"
-        local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
-        _out+="${tl}${vl}${sl_padded}${NL}"
-        ((drawn++))
-    done
-    for ((; drawn<vis; drawn++)); do
-        local padding=""
-        for _ in $(seq 1 $TREE_W); do padding+=" "; done
-        local sl="${SIDEBAR_LINES[$drawn]:-}"
-        local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
-        _out+="${padding}${vl}${sl_padded}${NL}"
-    done
-}
-
-# Draw full-width content
-draw_content_full() {
-    local -n _out=$1
-    local vis=$2
-    local -n _lines=$3
-    local scroll_var=$4
-
-    local total=${#_lines[@]}
-    local max_s=$((total - vis))
-    (( max_s < 0 )) && max_s=0
-    (( scroll_var > max_s )) && scroll_var=$max_s
-    (( scroll_var < 0 )) && scroll_var=0
-
-    local drawn=0
-    local idx=$scroll_var
-    while (( drawn < vis && idx < total )); do
-        _out+="${_lines[$idx]}${NL}"
-        ((drawn++))
-        ((idx++))
-    done
-    while (( drawn < vis )); do _out+="${NL}"; ((drawn++)); done
-}
 draw() {
     if (( DIFF_MODE )); then draw_diff; return; fi
     if (( FILES_MODE )); then draw_files; return; fi
@@ -879,14 +831,15 @@ draw() {
 
     local out=""
     out+="$CLEAR"
-
-    draw_status_bar out
+    build_status_bar
+    out+="$_SB"
 
     if (( FILTER_MODE )); then
-        out+="  ${BLD}${LGR}/${RST}${BLD}${FILTER_INPUT}${RST}${DIM}█ Esc to cancel${RST}$NL"
+        out+="  ${BLD}${LGR}/${RST}${BLD}${FILTER_INPUT}${RST}${DIM}█ Esc to cancel${RST}${NL}"
     fi
 
-    draw_hr out
+    build_hr
+    out+="$_HR"
 
     local vis=$((TERM_H - 3))
     (( FILTER_MODE )) && ((vis--))
@@ -908,7 +861,26 @@ draw() {
     fi
 
     if (( SIDEBAR_W > 0 )); then
-        draw_content_with_sidebar out "$vis"
+        build_sidebar "$vis"
+        local drawn=0
+        local vl="${DIM}│${RST}"
+        for ((idx=SCROLL; idx<RENDER_N && drawn<vis; idx++)); do
+            local tl; tl=$(pad_to "${RENDER[$idx]}" "$TREE_W")
+            if (( idx == CURSOR )); then
+                tl="${YEL}▸${tl:7}${RST}"
+            fi
+            local sl="${SIDEBAR_LINES[$drawn]:-}"
+            local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
+            out+="${tl}${vl}${sl_padded}${NL}"
+            ((drawn++))
+        done
+        for ((; drawn<vis; drawn++)); do
+            local padding=""
+            for _ in $(seq 1 $TREE_W); do padding+=" "; done
+            local sl="${SIDEBAR_LINES[$drawn]:-}"
+            local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
+            out+="${padding}${vl}${sl_padded}${NL}"
+        done
     else
         local drawn=0
         for ((idx=SCROLL; idx<RENDER_N && drawn<vis; idx++)); do
@@ -922,7 +894,8 @@ draw() {
         for ((; drawn<vis; drawn++)); do out+="${NL}"; done
     fi
 
-    draw_hr out
+    build_hr
+    out+="$_HR"
 
     if [[ -n "$MSG" ]]; then
         local now=$(date +%s)
