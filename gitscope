@@ -393,17 +393,37 @@ pre_render() {
     (( SUBJ_W < 10 )) && SUBJ_W=10
 
     local FL=""
-    [[ -n "$FILTER_TEXT" ]] && FL=$(echo "$FILTER_TEXT" | tr '[:upper:]' '[:lower:]')
+    [[ -n "$FILTER_TEXT" ]] && FL="$FILTER_TEXT"
 
     local has_desc=0
     [[ -n "$DESCENDANT_FILTER" ]] && has_desc=1
 
+    local use_regex=0
+    if [[ -n "$FL" ]]; then
+        echo "test" | grep -i "$FL" &>/dev/null && use_regex=1
+    fi
+
     for i in "${!H[@]}"; do
         if [[ -n "$FL" ]]; then
-            local h_lower="${H[$i],,}"
-            local s_lower="${S[$i],,}"
-            local a_lower="${A[$i],,}"
-            [[ "$h_lower" != *"$FL"* && "$s_lower" != *"$FL"* && "$a_lower" != *"$FL"* ]] && continue
+            if (( use_regex )); then
+                local line="${H[$i]} ${S[$i]} ${A[$i]}"
+                echo "$line" | grep -iq "$FL" 2>/dev/null || continue
+            else
+                local h_lower="${H[$i],,}"
+                local s_lower="${S[$i],,}"
+                local a_lower="${A[$i],,}"
+                local fl_lower; fl_lower=$(echo "$FL" | tr '[:upper:]' '[:lower:]')
+                [[ "$h_lower" != *"$fl_lower"* && "$s_lower" != *"$fl_lower"* && "$a_lower" != *"$fl_lower"* ]] && continue
+            fi
+        fi
+
+        if [[ -n "$DATE_FROM" ]]; then
+            local c_date="${D[$i]:0:10}"
+            [[ "$c_date" < "$DATE_FROM" ]] && continue
+        fi
+        if [[ -n "$DATE_TO" ]]; then
+            local c_date="${D[$i]:0:10}"
+            [[ "$c_date" > "$DATE_TO" ]] && continue
         fi
 
         if (( has_desc )); then
@@ -612,6 +632,9 @@ build_sidebar() {
 # Draw
 # ═══════════════════════════════════════════════════════════════════════════
 draw() {
+    if (( DIFF_MODE )); then draw_diff; return; fi
+    if (( FILES_MODE )); then draw_files; return; fi
+
     TERM_W=$(tput cols 2>/dev/null || echo 80)
     TERM_H=$(tput lines 2>/dev/null || echo 24)
 
@@ -633,6 +656,10 @@ draw() {
 
     if [[ -n "$DESCENDANT_FILTER" ]]; then
         out+="  ${BLD}${LYL}▼${RST} ${DIM}Descendants of${RST} ${BLD}${CYN}${DESCENDANT_FILTER:0:7}${RST}  ${DIM}Esc/0 to clear${RST}$NL"
+    fi
+
+    if [[ -n "$DATE_FROM" || -n "$DATE_TO" ]]; then
+        out+="  ${BLD}${LCY}📅${RST} ${DIM}Date:${RST} ${BLD}${DATE_FROM:-..}${RST} → ${BLD}${DATE_TO:-..}${RST}  ${DIM}D/Esc to clear${RST}$NL"
     fi
 
     local flt=""
@@ -725,10 +752,19 @@ draw() {
     for _ in $(seq 1 $TERM_W); do hr2+="─"; done
     out+="${DIM}${hr2}${RST}$NL"
 
+    if [[ -n "$MSG" ]]; then
+        local now=$(date +%s)
+        if (( now - MSG_TIME < 2 )); then
+            out+="  ${BLD}${LGR}${MSG}${RST}$NL"
+        else
+            MSG=""
+        fi
+    fi
+
     if (( SIDEBAR_FOCUS )); then
         out+="  ${DIM}j/k${RST}↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}$NL"
     else
-        out+="  ${DIM}j/k${RST}↕ cursor  ${DIM}Enter/o${RST}zoom  ${DIM}0${RST}reset  ${DIM}/${RST}filter  ${DIM}b${RST}branch  ${DIM}?${RST}help  ${DIM}q${RST}quit${RST}$NL"
+        out+="  ${DIM}j/k${RST}↕  ${DIM}d${RST}diff  ${DIM}f${RST}files  ${DIM}y${RST}copy  ${DIM}D${RST}date  ${DIM}/${RST}filter  ${DIM}b${RST}branch  ${DIM}?${RST}help  ${DIM}q${RST}quit${RST}$NL"
     fi
 
     printf '%b' "$out"
@@ -865,6 +901,32 @@ while true; do
         continue
     fi
 
+    if (( DIFF_MODE )); then
+        case "$key" in
+            'j'|'DOWN')     ((DIFF_SCROLL++)); DIRTY=1 ;;
+            'k'|'UP')       ((DIFF_SCROLL > 0)) && ((DIFF_SCROLL--)); DIRTY=1 ;;
+            'J')            ((DIFF_SCROLL+=5)); DIRTY=1 ;;
+            'K')            ((DIFF_SCROLL > 4)) && ((DIFF_SCROLL-=5)) || DIFF_SCROLL=0; DIRTY=1 ;;
+            'q'|'ESC')      DIFF_MODE=0; DIRTY=1 ;;
+            $'\x03')        break ;;
+            '')             ;;
+        esac
+        continue
+    fi
+
+    if (( FILES_MODE )); then
+        case "$key" in
+            'j'|'DOWN')     ((FILES_SCROLL++)); DIRTY=1 ;;
+            'k'|'UP')       ((FILES_SCROLL > 0)) && ((FILES_SCROLL--)); DIRTY=1 ;;
+            'J')            ((FILES_SCROLL+=5)); DIRTY=1 ;;
+            'K')            ((FILES_SCROLL > 4)) && ((FILES_SCROLL-=5)) || FILES_SCROLL=0; DIRTY=1 ;;
+            'q'|'ESC')      FILES_MODE=0; DIRTY=1 ;;
+            $'\x03')        break ;;
+            '')             ;;
+        esac
+        continue
+    fi
+
     if (( SIDEBAR_FOCUS )); then
         case "$key" in
             'j'|'DOWN')     ((BRANCH_IDX++)); ((BRANCH_IDX >= ${#BRANCHES[@]})) && BRANCH_IDX=$((${#BRANCHES[@]}-1)); DIRTY=1 ;;
@@ -921,7 +983,8 @@ while true; do
         '+')              ((COUNT += 10)); ((COUNT > 200)) && COUNT=200; REFRESH=1 ;;
         '-')              ((COUNT > 10)) && ((COUNT -= 10)); REFRESH=1 ;;
         'b')              SIDEBAR_FOCUS=1; BRANCH_IDX=0; DIRTY=1 ;;
-        '0')              BRANCH_FILTER=""; FILTER_TEXT=""; DESCENDANT_FILTER=""; REFRESH=1 ;;
+        '0')              BRANCH_FILTER=""; FILTER_TEXT=""; DESCENDANT_FILTER=""
+                          DATE_FROM=""; DATE_TO=""; REFRESH=1 ;;
         '/')              FILTER_MODE=1; FILTER_INPUT=""; DIRTY=1 ;;
         'o'|$'\x0a'|$'\x0d')
             if (( CURSOR >= 0 && CURSOR < RENDER_N )); then
@@ -938,7 +1001,48 @@ while true; do
         'ESC')
             if [[ -n "$DESCENDANT_FILTER" ]]; then
                 DESCENDANT_FILTER=""; CURSOR=0; pre_render; DIRTY=1
+            elif [[ -n "$DATE_FROM" || -n "$DATE_TO" ]]; then
+                DATE_FROM=""; DATE_TO=""; CURSOR=0; pre_render; DIRTY=1
             fi
+            ;;
+        'd')
+            if (( CURSOR >= 0 )); then
+                ci=${RENDER_TO_COMMIT[$CURSOR]:-}
+                [[ -n "$ci" ]] && open_diff "$ci"
+            fi
+            ;;
+        'f')
+            if (( CURSOR >= 0 )); then
+                ci=${RENDER_TO_COMMIT[$CURSOR]:-}
+                [[ -n "$ci" ]] && open_files "$ci"
+            fi
+            ;;
+        'y')
+            if (( CURSOR >= 0 )); then
+                ci=${RENDER_TO_COMMIT[$CURSOR]:-}
+                if [[ -n "$ci" && -n "${H[$ci]}" ]]; then
+                    if [[ -n "$CLIPBOARD_CMD" ]]; then
+                        echo -n "${H[$ci]}" | $CLIPBOARD_CMD 2>/dev/null
+                        show_msg "Copied ${H[$ci]:0:7} to clipboard"
+                    else
+                        show_msg "No clipboard tool found"
+                    fi
+                fi
+            fi
+            ;;
+        'D')
+            if [[ -n "$DATE_FROM" || -n "$DATE_TO" ]]; then
+                DATE_FROM=""; DATE_TO=""; CURSOR=0
+                show_msg "Date filter cleared"
+            else
+                local today; today=$(date +%Y-%m-%d)
+                local week_ago; week_ago=$(date -d "$today - 7 days" +%Y-%m-%d 2>/dev/null || date -v-7d +%Y-%m-%d 2>/dev/null || echo "")
+                if [[ -n "$week_ago" ]]; then
+                    DATE_FROM="$week_ago"; DATE_TO="$today"
+                    show_msg "Last 7 days: $week_ago → $today"
+                fi
+            fi
+            CURSOR=0; pre_render; DIRTY=1
             ;;
         '?')              HELP_ON=$(( 1 - HELP_ON )); DIRTY=1 ;;
         'R'|'r')          REFRESH=1 ;;
