@@ -1,0 +1,8 @@
+[package]
+name = "gitscope"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+git2 = "0.19"
+crossterm = "0.28"
