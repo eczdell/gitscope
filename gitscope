@@ -52,6 +52,8 @@ REPORT_EMAIL_FILTER=""
 REPORT_EMAIL_INPUT=""
 REPORT_EMAIL_MODE=0
 REPORT_SORT="name"
+REPORT_AC_IDX=0
+declare -a REPORT_AC_LIST=()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Colors
@@ -446,13 +448,23 @@ draw_report() {
     out+="${BLD}${CYN}  🔭  gitscope${RST}  ${DIM}│${RST}  ${BLD}${LYL}Report: files by author${RST}$NL"
 
     if (( REPORT_EMAIL_MODE )); then
-        out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_INPUT}${RST}${DIM}█ Esc to cancel${RST}$NL"
-        local suggestions
-        suggestions=$(git log --format="%ae" 2>/dev/null | sort -u | grep -i "^${REPORT_EMAIL_INPUT}" 2>/dev/null | head -3)
-        if [[ -n "$suggestions" ]]; then
-            while IFS= read -r sug; do
-                out+="  ${DIM}  → ${sug}${RST}$NL"
-            done <<< "$suggestions"
+        out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_INPUT}${RST}${DIM}█ Esc to cancel  Tab to select${RST}$NL"
+        local ac_total=${#REPORT_AC_LIST[@]}
+        if (( ac_total > 0 )); then
+            out+="  ${DIM}${ac_total} match(es)${RST}$NL"
+            local idx=0
+            while (( idx < ac_total )); do
+                local sug="${REPORT_AC_LIST[$idx]}"
+                local prefix="${sug%%${REPORT_EMAIL_INPUT}*}"
+                local match="$REPORT_EMAIL_INPUT"
+                local rest="${sug#*${REPORT_EMAIL_INPUT}}"
+                local marker="  "
+                (( idx == REPORT_AC_IDX )) && marker="${BLD}${LGR}▸${RST}"
+                out+="  ${marker} ${DIM}${prefix}${RST}${BLD}${LGR}${match}${RST}${DIM}${rest}${RST}$NL"
+                ((idx++))
+            done
+        elif [[ -n "$REPORT_EMAIL_INPUT" ]]; then
+            out+="  ${DIM}  no matches${RST}$NL"
         fi
     elif [[ -n "$REPORT_EMAIL_FILTER" ]]; then
         out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_FILTER}${RST}  ${DIM}Esc to clear${RST}$NL"
@@ -467,7 +479,12 @@ draw_report() {
     out+="${DIM}${hr}${RST}$NL"
 
     local vis=$((TERM_H - 4))
-    (( REPORT_EMAIL_MODE )) && ((vis--))
+    if (( REPORT_EMAIL_MODE )); then
+        ((vis--))
+        local ac_count=${#REPORT_AC_LIST[@]}
+        (( ac_count > 0 )) && ((vis-=ac_count+1))
+        (( ac_count == 0 && ${#REPORT_EMAIL_INPUT} > 0 )) && ((vis--))
+    fi
     [[ -n "$REPORT_EMAIL_FILTER" ]] && ((vis--))
     [[ "$REPORT_SORT" == "date" ]] && ((vis--))
     (( vis < 1 )) && vis=1
@@ -1063,14 +1080,35 @@ while true; do
     if (( REPORT_MODE )); then
         if (( REPORT_EMAIL_MODE )); then
             case "$key" in
-                $'\x0a'|$'\x0d') REPORT_EMAIL_FILTER="$REPORT_EMAIL_INPUT"
-                                 REPORT_EMAIL_MODE=0; open_report; DIRTY=1 ;;
+                $'\x0a'|$'\x0d')
+                    if (( ${#REPORT_AC_LIST[@]} > 0 )); then
+                        REPORT_EMAIL_INPUT="${REPORT_AC_LIST[$REPORT_AC_IDX]}"
+                    fi
+                    REPORT_EMAIL_FILTER="$REPORT_EMAIL_INPUT"
+                    REPORT_EMAIL_MODE=0; open_report; DIRTY=1 ;;
+                $'\x09')
+                    ((REPORT_AC_IDX++))
+                    ((REPORT_AC_IDX >= ${#REPORT_AC_LIST[@]})) && REPORT_AC_IDX=0
+                    DIRTY=1 ;;
                 'ESC')           REPORT_EMAIL_INPUT=""; REPORT_EMAIL_MODE=0; DIRTY=1 ;;
-                $'\x7f'|$'\x08') REPORT_EMAIL_INPUT="${REPORT_EMAIL_INPUT%?}"; DIRTY=1 ;;
+                $'\x7f'|$'\x08') REPORT_EMAIL_INPUT="${REPORT_EMAIL_INPUT%?}"
+                                 REPORT_AC_IDX=0
+                                 DIRTY=1 ;;
                 $'\x03')         break ;;
                 '')              ;;
-                *)               REPORT_EMAIL_INPUT+="$key"; DIRTY=1 ;;
+                *)               REPORT_EMAIL_INPUT+="$key"
+                                 REPORT_AC_IDX=0
+                                 DIRTY=1 ;;
             esac
+            if (( REPORT_EMAIL_MODE )); then
+                REPORT_AC_LIST=()
+                if [[ -n "$REPORT_EMAIL_INPUT" ]]; then
+                    mapfile -t REPORT_AC_LIST < <(
+                        git log --format="%ae" 2>/dev/null | sort -u |
+                        grep -i "^${REPORT_EMAIL_INPUT}" 2>/dev/null | head -5
+                    )
+                fi
+            fi
             continue
         fi
         case "$key" in
