@@ -79,6 +79,7 @@ declare -a H=() P=() A=() D=() S=() R=()
 declare -A IX=() CH=() BR_AT=() TG_AT=() BRCOL=()
 declare -a BRANCHES=() TAGS=() c_lane=()
 declare -A OCC=() IS_TIP=() TIP_BR=()
+REPO_NAME=""
 CUR_BR="" TOTAL="" HEAD_H="" MAXL=0 NLANES=1
 
 declare -A AUTHOR_COUNT=()
@@ -149,6 +150,7 @@ fetch_data() {
     }
 
     CUR_BR=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+    REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "repo")
     mapfile -t BRANCHES < <(git for-each-ref --format='%(refname:short)' refs/heads/ | sort)
     mapfile -t TAGS     < <(git for-each-ref --format='%(refname:short)' refs/tags/ | sort)
     if [[ -n "$BRANCH_FILTER" ]]; then
@@ -284,13 +286,12 @@ open_diff() {
 draw_diff() {
     local out=""
     out+="$CLEAR"
-    out+="${BLD}${CYN}  🔭  gitscope${RST}  ${DIM}│${RST}  ${BLD}${YEL}Commit diff${RST}  ${DIM}${DIFF_HASH:0:7}${RST}$NL"
-    out+="${DIM}"
-    local hr=""
-    for _ in $(seq 1 $TERM_W); do hr+="─"; done
-    out+="${hr}${RST}$NL"
 
-    local vis=$((TERM_H - 4))
+    draw_status_bar out
+
+    draw_hr out
+
+    local vis=$((TERM_H - 3))
     local total=${#DIFF_LINES[@]}
     local max_s=$((total - vis))
     (( max_s < 0 )) && max_s=0
@@ -302,25 +303,23 @@ draw_diff() {
     while (( drawn < vis && idx < total )); do
         local line="${DIFF_LINES[$idx]}"
         if [[ "$line" == *"diff --git"* ]]; then
-            out+="${BLD}${LGR}${line}${RST}$NL"
+            out+="${BLD}${LGR}${line}${RST}${NL}"
         elif [[ "$line" == *"@@"* ]]; then
-            out+="${BLD}${CYN}${line}${RST}$NL"
+            out+="${BLD}${CYN}${line}${RST}${NL}"
         elif [[ "$line" == *"+"* ]] && [[ "$line" != *"+++"* ]]; then
-            out+="${LGR}${line}${RST}$NL"
+            out+="${LGR}${line}${RST}${NL}"
         elif [[ "$line" == *"-"* ]] && [[ "$line" != *"---"* ]]; then
-            out+="${LRE}${line}${RST}$NL"
+            out+="${LRE}${line}${RST}${NL}"
         else
-            out+="${line}$NL"
+            out+="${line}${NL}"
         fi
         ((drawn++))
         ((idx++))
     done
-    while (( drawn < vis )); do out+="$NL"; ((drawn++)); done
+    while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
-    local hr2=""
-    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
-    out+="${DIM}${hr2}${RST}$NL"
-    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}$NL"
+    draw_hr out
+    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
 }
@@ -341,13 +340,12 @@ open_files() {
 draw_files() {
     local out=""
     out+="$CLEAR"
-    out+="${BLD}${CYN}  🔭  gitscope${RST}  ${DIM}│${RST}  ${BLD}${LYL}Changed files${RST}  ${DIM}${DIFF_HASH:0:7}${RST}$NL"
-    out+="${DIM}"
-    local hr=""
-    for _ in $(seq 1 $TERM_W); do hr+="─"; done
-    out+="${hr}${RST}$NL"
 
-    local vis=$((TERM_H - 4))
+    draw_status_bar out
+
+    draw_hr out
+
+    local vis=$((TERM_H - 3))
     local total=${#FILES_LINES[@]}
     local max_s=$((total - vis))
     (( max_s < 0 )) && max_s=0
@@ -359,21 +357,19 @@ draw_files() {
     while (( drawn < vis && idx < total )); do
         local line="${FILES_LINES[$idx]}"
         if [[ "$line" == *"│"* ]]; then
-            out+="  ${DIM}${line}${RST}$NL"
+            out+="  ${DIM}${line}${RST}${NL}"
         elif [[ "$line" == *"file changed"* ]] || [[ "$line" == *"files changed"* ]]; then
-            out+="${BLD}${line}${RST}$NL"
+            out+="${BLD}${line}${RST}${NL}"
         else
-            out+="  ${line}$NL"
+            out+="  ${line}${NL}"
         fi
         ((drawn++))
         ((idx++))
     done
-    while (( drawn < vis )); do out+="$NL"; ((drawn++)); done
+    while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
-    local hr2=""
-    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
-    out+="${DIM}${hr2}${RST}$NL"
-    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}$NL"
+    draw_hr out
+    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
 }
@@ -445,13 +441,14 @@ open_report() {
 draw_report() {
     local out=""
     out+="$CLEAR"
-    out+="${BLD}${CYN}  🔭  gitscope${RST}  ${DIM}│${RST}  ${BLD}${LYL}Report: files by author${RST}$NL"
+
+    draw_status_bar out
 
     if (( REPORT_EMAIL_MODE )); then
-        out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_INPUT}${RST}${DIM}█ Esc to cancel  Tab to select${RST}$NL"
+        out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_INPUT}${RST}${DIM}█ Esc to cancel  Tab to select${RST}${NL}"
         local ac_total=${#REPORT_AC_LIST[@]}
         if (( ac_total > 0 )); then
-            out+="  ${DIM}${ac_total} match(es)${RST}$NL"
+            out+="  ${DIM}${ac_total} match(es)${RST}${NL}"
             local idx=0
             while (( idx < ac_total )); do
                 local sug="${REPORT_AC_LIST[$idx]}"
@@ -460,33 +457,23 @@ draw_report() {
                 local rest="${sug#*${REPORT_EMAIL_INPUT}}"
                 local marker="  "
                 (( idx == REPORT_AC_IDX )) && marker="${BLD}${LGR}▸${RST}"
-                out+="  ${marker} ${DIM}${prefix}${RST}${BLD}${LGR}${match}${RST}${DIM}${rest}${RST}$NL"
+                out+="  ${marker} ${DIM}${prefix}${RST}${BLD}${LGR}${match}${RST}${DIM}${rest}${RST}${NL}"
                 ((idx++))
             done
         elif [[ -n "$REPORT_EMAIL_INPUT" ]]; then
-            out+="  ${DIM}  no matches${RST}$NL"
+            out+="  ${DIM}  no matches${RST}${NL}"
         fi
-    elif [[ -n "$REPORT_EMAIL_FILTER" ]]; then
-        out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_FILTER}${RST}  ${DIM}Esc to clear${RST}$NL"
     fi
 
-    if [[ "$REPORT_SORT" == "date" ]]; then
-        out+="  ${DIM}Sorted by: ${GRN}date${RST}  ${DIM}(t to toggle)${RST}$NL"
-    fi
+    draw_hr out
 
-    local hr=""
-    for _ in $(seq 1 $TERM_W); do hr+="─"; done
-    out+="${DIM}${hr}${RST}$NL"
-
-    local vis=$((TERM_H - 4))
+    local vis=$((TERM_H - 3))
     if (( REPORT_EMAIL_MODE )); then
         ((vis--))
         local ac_count=${#REPORT_AC_LIST[@]}
         (( ac_count > 0 )) && ((vis-=ac_count+1))
         (( ac_count == 0 && ${#REPORT_EMAIL_INPUT} > 0 )) && ((vis--))
     fi
-    [[ -n "$REPORT_EMAIL_FILTER" ]] && ((vis--))
-    [[ "$REPORT_SORT" == "date" ]] && ((vis--))
     (( vis < 1 )) && vis=1
 
     local total=${#REPORT_LINES[@]}
@@ -498,16 +485,14 @@ draw_report() {
     local drawn=0
     local idx=$REPORT_SCROLL
     while (( drawn < vis && idx < total )); do
-        out+="${REPORT_LINES[$idx]}$NL"
+        out+="${REPORT_LINES[$idx]}${NL}"
         ((drawn++))
         ((idx++))
     done
-    while (( drawn < vis )); do out+="$NL"; ((drawn++)); done
+    while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
-    local hr2=""
-    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
-    out+="${DIM}${hr2}${RST}$NL"
-    out+="  ${DIM}j/k${RST}↕  ${DIM}g/G${RST}top/bot  ${DIM}/${RST}filter  ${DIM}t${RST}sort  ${DIM}b${RST}branch  ${DIM}q/Esc${RST} close${RST}$NL"
+    draw_hr out
+    out+="  ${DIM}j/k${RST}↕  ${DIM}g/G${RST}top/bot  ${DIM}/${RST}filter  ${DIM}t${RST}sort  ${DIM}b${RST}branch  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
 }
@@ -775,6 +760,110 @@ build_sidebar() {
 # ═══════════════════════════════════════════════════════════════════════════
 # Draw
 # ═══════════════════════════════════════════════════════════════════════════
+
+# Status bar (dwm-style)
+# Usage: local out=""; draw_status_bar out TERM_W CUR_BR ...
+draw_status_bar() {
+    local -n _out=$1
+    local _tw=$TERM_W
+    _out+="${BLD}${CYN} ${RST} ${BLD}${CYN}${REPO_NAME}${RST}"
+    _out+="${DIM} │ ${RST}${BLD}${GRN}${CUR_BR}${RST}"
+
+    local mode_label="tree"
+    (( DIFF_MODE ))  && mode_label="diff"
+    (( FILES_MODE )) && mode_label="files"
+    (( REPORT_MODE )) && mode_label="report"
+
+    _out+="${DIM} │ ${RST}${BLD}${WHT}${TOTAL}${RST}${DIM} commits${RST}"
+    _out+="${DIM} │ ${RST}${BLD}${LCY}${mode_label}${RST}"
+
+    if [[ -n "$FILTER_TEXT" ]]; then
+        _out+="${DIM} │ ${RST}${BLD}${LGR}/${RST}${FILTER_TEXT}"
+    fi
+
+    if [[ -n "$DATE_FROM" || -n "$DATE_TO" ]]; then
+        _out+="${DIM} │ ${RST}${BLD}${LCY}📅${RST} ${DATE_FROM:-..}→${DATE_TO:-..}"
+    fi
+
+    if [[ -n "$DESCENDANT_FILTER" ]]; then
+        _out+="${DIM} │ ${RST}${BLD}${LYL}▼${RST} zoom:${DESCENDANT_FILTER:0:7}"
+    fi
+
+    if (( SHOW_ALL )); then
+        _out+="${DIM} │ ${RST}${LYL}${BLD}ALL${RST}"
+    fi
+    if (( SHOW_META )); then
+        _out+="${DIM} │ ${RST}${LYL}${BLD}META${RST}"
+    fi
+    if (( COMPACT )); then
+        _out+="${DIM} │ ${RST}${LYL}${BLD}CMP${RST}"
+    fi
+
+    local used=${#_out}
+    local fill=$((_tw - used))
+    (( fill > 0 )) && _out+=$(printf '%*s' $fill '')
+
+    _out+="${NL}"
+}
+
+# Draw separator line
+draw_hr() {
+    local -n _out=$1
+    local hr=""
+    for _ in $(seq 1 $TERM_W); do hr+="─"; done
+    _out+="${DIM}${hr}${RST}${NL}"
+}
+
+# Draw content with sidebar (used by tree mode)
+draw_content_with_sidebar() {
+    local -n _out=$1
+    local vis=$2
+
+    build_sidebar "$vis"
+
+    local drawn=0
+    local vl="${DIM}│${RST}"
+    for ((idx=SCROLL; idx<RENDER_N && drawn<vis; idx++)); do
+        local tl; tl=$(pad_to "${RENDER[$idx]}" "$TREE_W")
+        if (( idx == CURSOR )); then
+            tl="${YEL}▸${tl:7}${RST}"
+        fi
+        local sl="${SIDEBAR_LINES[$drawn]:-}"
+        local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
+        _out+="${tl}${vl}${sl_padded}${NL}"
+        ((drawn++))
+    done
+    for ((; drawn<vis; drawn++)); do
+        local padding=""
+        for _ in $(seq 1 $TREE_W); do padding+=" "; done
+        local sl="${SIDEBAR_LINES[$drawn]:-}"
+        local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
+        _out+="${padding}${vl}${sl_padded}${NL}"
+    done
+}
+
+# Draw full-width content
+draw_content_full() {
+    local -n _out=$1
+    local vis=$2
+    local -n _lines=$3
+    local scroll_var=$4
+
+    local total=${#_lines[@]}
+    local max_s=$((total - vis))
+    (( max_s < 0 )) && max_s=0
+    (( scroll_var > max_s )) && scroll_var=$max_s
+    (( scroll_var < 0 )) && scroll_var=0
+
+    local drawn=0
+    local idx=$scroll_var
+    while (( drawn < vis && idx < total )); do
+        _out+="${_lines[$idx]}${NL}"
+        ((drawn++))
+        ((idx++))
+    done
+    while (( drawn < vis )); do _out+="${NL}"; ((drawn++)); done
+}
 draw() {
     if (( DIFF_MODE )); then draw_diff; return; fi
     if (( FILES_MODE )); then draw_files; return; fi
@@ -791,56 +880,16 @@ draw() {
     local out=""
     out+="$CLEAR"
 
-    out+="${BLD}${CYN}  🔭  gitscope${RST}$NL"
+    draw_status_bar out
 
     if (( FILTER_MODE )); then
         out+="  ${BLD}${LGR}/${RST}${BLD}${FILTER_INPUT}${RST}${DIM}█ Esc to cancel${RST}$NL"
-    elif [[ -n "$FILTER_TEXT" ]]; then
-        out+="  ${BLD}${LGR}/${RST}${BLD}${FILTER_TEXT}${RST}  ${DIM}Esc to clear${RST}$NL"
     fi
 
-    if [[ -n "$DESCENDANT_FILTER" ]]; then
-        out+="  ${BLD}${LYL}▼${RST} ${DIM}Descendants of${RST} ${BLD}${CYN}${DESCENDANT_FILTER:0:7}${RST}  ${DIM}Esc/0 to clear${RST}$NL"
-    fi
+    draw_hr out
 
-    if [[ -n "$DATE_FROM" || -n "$DATE_TO" ]]; then
-        out+="  ${BLD}${LCY}📅${RST} ${DIM}Date:${RST} ${BLD}${DATE_FROM:-..}${RST} → ${BLD}${DATE_TO:-..}${RST}  ${DIM}D/Esc to clear${RST}$NL"
-    fi
-
-    local flt=""
-    flt+="  ${DIM}Branch:${RST} "
-    if [[ -n "$BRANCH_FILTER" ]]; then
-        flt+="${BLD}${YEL}${BRANCH_FILTER}${RST}"
-    elif (( SHOW_ALL )); then
-        flt+="${DIM}all branches${RST}"
-    else
-        flt+="${GRN}${BLD}${CUR_BR}${RST}"
-    fi
-
-    flt+="  ${DIM}│${RST}  "
-    flt+="${WHT}${#H[@]}/${TOTAL}${RST} ${DIM}commits${RST}"
-
-    flt+="  ${DIM}│${RST}  "
-    (( SHOW_ALL )) && flt+="${LYL}${BLD}ALL${RST}" || flt+="${DIM}ALL${RST}"
-    flt+="  "
-    (( SHOW_META )) && flt+="${LYL}${BLD}META${RST}" || flt+="${DIM}META${RST}"
-    flt+="  "
-    (( COMPACT )) && flt+="${LYL}${BLD}CMP${RST}" || flt+="${DIM}CMP${RST}"
-
-    if [[ -n "$BRANCH_FILTER" ]]; then
-        flt+="  ${DIM}│${RST}  ${DIM}Press ${GRY}0${RST}${DIM} to reset${RST}"
-    fi
-
-    out+="${flt}$NL"
-
-    local hr_line=""
-    for _ in $(seq 1 $TERM_W); do hr_line+="═"; done
-    out+="${DIM}${hr_line}${RST}$NL"
-
-    local vis=$((TERM_H - 4))
+    local vis=$((TERM_H - 3))
     (( FILTER_MODE )) && ((vis--))
-    [[ -n "$FILTER_TEXT" ]] && ((vis--))
-    [[ -n "$DESCENDANT_FILTER" ]] && ((vis--))
     (( vis < 1 )) && vis=1
 
     local max_scroll=$((RENDER_N - vis))
@@ -859,57 +908,35 @@ draw() {
     fi
 
     if (( SIDEBAR_W > 0 )); then
-        build_sidebar "$vis"
-
-        local drawn=0
-        local vl="${DIM}│${RST}"
-        for ((idx=SCROLL; idx<RENDER_N && drawn<vis; idx++)); do
-            local tl; tl=$(pad_to "${RENDER[$idx]}" "$TREE_W")
-            if (( idx == CURSOR )); then
-                tl="${YEL}▸${tl:7}${RST}"
-            fi
-            local sl="${SIDEBAR_LINES[$drawn]:-}"
-            local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
-            out+="${tl}${vl}${sl_padded}$NL"
-            ((drawn++))
-        done
-        for ((; drawn<vis; drawn++)); do
-            local padding=""
-            for _ in $(seq 1 $TREE_W); do padding+=" "; done
-            local sl="${SIDEBAR_LINES[$drawn]:-}"
-            local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
-            out+="${padding}${vl}${sl_padded}$NL"
-        done
+        draw_content_with_sidebar out "$vis"
     else
         local drawn=0
         for ((idx=SCROLL; idx<RENDER_N && drawn<vis; idx++)); do
             if (( idx == CURSOR )); then
-                out+="${YEL}▸${RENDER[$idx]:7}${RST}$NL"
+                out+="${YEL}▸${RENDER[$idx]:7}${RST}${NL}"
             else
-                out+="${RENDER[$idx]}$NL"
+                out+="${RENDER[$idx]}${NL}"
             fi
             ((drawn++))
         done
-        for ((; drawn<vis; drawn++)); do out+="$NL"; done
+        for ((; drawn<vis; drawn++)); do out+="${NL}"; done
     fi
 
-    local hr2=""
-    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
-    out+="${DIM}${hr2}${RST}$NL"
+    draw_hr out
 
     if [[ -n "$MSG" ]]; then
         local now=$(date +%s)
         if (( now - MSG_TIME < 2 )); then
-            out+="  ${BLD}${LGR}${MSG}${RST}$NL"
+            out+="  ${BLD}${LGR}${MSG}${RST}${NL}"
         else
             MSG=""
         fi
     fi
 
     if (( SIDEBAR_FOCUS )); then
-        out+="  ${DIM}j/k${RST}↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}$NL"
+        out+="  ${DIM}j/k${RST}↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}${NL}"
     else
-        out+="  ${DIM}j/k${RST}↕  ${DIM}d${RST}diff  ${DIM}f${RST}files  ${DIM}y${RST}copy  ${DIM}D${RST}date  ${DIM}R${RST}report  ${DIM}/${RST}filter  ${DIM}?${RST}help  ${DIM}q${RST}quit${RST}$NL"
+        out+="  ${DIM}j/k${RST}↕  ${DIM}d${RST}diff  ${DIM}f${RST}files  ${DIM}y${RST}copy  ${DIM}D${RST}date  ${DIM}R${RST}report  ${DIM}/${RST}filter  ${DIM}?${RST}help  ${DIM}q${RST}quit${RST}${NL}"
     fi
 
     printf '%b' "$out"
