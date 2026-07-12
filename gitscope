@@ -45,6 +45,10 @@ CLIPBOARD_CMD=""
 MSG=""
 MSG_TIME=0
 
+REPORT_MODE=0
+REPORT_SCROLL=0
+declare -a REPORT_LINES=()
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Colors
 # ═══════════════════════════════════════════════════════════════════════════
@@ -369,6 +373,94 @@ draw_files() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Report View (files by author)
+# ═══════════════════════════════════════════════════════════════════════════
+open_report() {
+    REPORT_LINES=()
+
+    local hr=""
+    for _ in $(seq 1 62); do hr+="="; done
+    local hr2=""
+    for _ in $(seq 1 62); do hr2+="-"; done
+
+    local data
+    data=$(find . -type f -name "*.py" ! -path "./.git/*" 2>/dev/null | while read f; do
+        local filename
+        filename=$(basename "$f")
+        local relpath="${f#./}"
+        local info
+        info=$(git log --diff-filter=A --format="%ae|%ad" --date=short -- "$relpath" 2>/dev/null | head -n 1)
+        local email
+        email=$(echo "$info" | cut -d'|' -f1)
+        local date
+        date=$(echo "$info" | cut -d'|' -f2)
+        [[ -n "$email" ]] && echo "${email}|${filename}|${date}"
+    done | sort -t"|" -k1,1)
+
+    [[ -z "$data" ]] && { REPORT_LINES+=("  ${DIM}No file data found${RST}"); REPORT_SCROLL=0; REPORT_MODE=1; DIRTY=1; return; }
+
+    REPORT_LINES+=("${BLD}${hr}${RST}")
+    REPORT_LINES+=("${BLD}                    FILES BY AUTHOR${RST}")
+    REPORT_LINES+=("${BLD}${hr}${RST}")
+
+    local current_email=""
+    while IFS='|' read -r email filename date; do
+        [[ -z "$email" ]] && continue
+        if [[ "$email" != "$current_email" ]]; then
+            REPORT_LINES+=("")
+            REPORT_LINES+=("${BLD}${hr2}${RST}")
+            REPORT_LINES+=("${BLD}  CREATED BY: ${CYN}${email}${RST}")
+            REPORT_LINES+=("${BLD}${hr2}${RST}")
+            REPORT_LINES+=("  ${BLD}FILE NAME${RST}$(printf '%38s' '')${BLD}DATE${RST}")
+            REPORT_LINES+=("${DIM}------------------------------------------------------------${RST}")
+            current_email="$email"
+        fi
+        local padding=$(( 48 - ${#filename} ))
+        (( padding < 2 )) && padding=2
+        REPORT_LINES+=("  ${LYL}${filename}${RST}$(printf '%*s' $padding '')${DIM}${date}${RST}")
+    done <<< "$data"
+
+    REPORT_LINES+=("")
+    REPORT_LINES+=("${BLD}${hr}${RST}")
+
+    REPORT_SCROLL=0
+    REPORT_MODE=1
+    DIRTY=1
+}
+
+draw_report() {
+    local out=""
+    out+="$CLEAR"
+    out+="${BLD}${CYN}  🔭  gitscope${RST}  ${DIM}│${RST}  ${BLD}${LYL}Report: files by author${RST}$NL"
+    local hr=""
+    for _ in $(seq 1 $TERM_W); do hr+="─"; done
+    out+="${DIM}${hr}${RST}$NL"
+
+    local vis=$((TERM_H - 4))
+    local total=${#REPORT_LINES[@]}
+    local max_s=$((total - vis))
+    (( max_s < 0 )) && max_s=0
+    (( REPORT_SCROLL > max_s )) && REPORT_SCROLL=$max_s
+    (( REPORT_SCROLL < 0 )) && REPORT_SCROLL=0
+
+    local drawn=0
+    local idx=$REPORT_SCROLL
+    while (( drawn < vis && idx < total )); do
+        out+="${REPORT_LINES[$idx]}$NL"
+        ((drawn++))
+        ((idx++))
+    done
+    while (( drawn < vis )); do out+="$NL"; ((drawn++)); done
+
+    local hr2=""
+    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
+    out+="${DIM}${hr2}${RST}$NL"
+    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}$NL"
+
+    printf '%b' "$out"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Message display
 # ═══════════════════════════════════════════════════════════════════════════
 show_msg() { MSG="$1"; MSG_TIME=$(date +%s); }
@@ -634,6 +726,7 @@ build_sidebar() {
 draw() {
     if (( DIFF_MODE )); then draw_diff; return; fi
     if (( FILES_MODE )); then draw_files; return; fi
+    if (( REPORT_MODE )); then draw_report; return; fi
 
     TERM_W=$(tput cols 2>/dev/null || echo 80)
     TERM_H=$(tput lines 2>/dev/null || echo 24)
@@ -764,7 +857,7 @@ draw() {
     if (( SIDEBAR_FOCUS )); then
         out+="  ${DIM}j/k${RST}↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}$NL"
     else
-        out+="  ${DIM}j/k${RST}↕  ${DIM}d${RST}diff  ${DIM}f${RST}files  ${DIM}y${RST}copy  ${DIM}D${RST}date  ${DIM}/${RST}filter  ${DIM}b${RST}branch  ${DIM}?${RST}help  ${DIM}q${RST}quit${RST}$NL"
+        out+="  ${DIM}j/k${RST}↕  ${DIM}d${RST}diff  ${DIM}f${RST}files  ${DIM}y${RST}copy  ${DIM}D${RST}date  ${DIM}R${RST}report  ${DIM}/${RST}filter  ${DIM}?${RST}help  ${DIM}q${RST}quit${RST}$NL"
     fi
 
     printf '%b' "$out"
@@ -795,7 +888,8 @@ draw_help() {
     out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}y${RST}           Copy commit hash                   ${BLD}${CYN}║${RST}$NL"
     out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}/${RST}           Filter commits (regex)            ${BLD}${CYN}║${RST}$NL"
     out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}D${RST}           Toggle last-7-day date filter      ${BLD}${CYN}║${RST}$NL"
-    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}R${RST}           Refresh data                      ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}R${RST}           Report: files by author            ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}r${RST}           Refresh data                      ${BLD}${CYN}║${RST}$NL"
     out+="${hpfx}${BLD}${CYN}╠════════════════════════════════════════════════════╣${RST}$NL"
     out+="${hpfx}${BLD}${CYN}║${RST}  ${BLD}Display${RST}                                          ${BLD}${CYN}║${RST}$NL"
     out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}a${RST}           Toggle all branches                ${BLD}${CYN}║${RST}$NL"
@@ -931,6 +1025,19 @@ while true; do
         continue
     fi
 
+    if (( REPORT_MODE )); then
+        case "$key" in
+            'j'|'DOWN')     ((REPORT_SCROLL++)); DIRTY=1 ;;
+            'k'|'UP')       ((REPORT_SCROLL > 0)) && ((REPORT_SCROLL--)); DIRTY=1 ;;
+            'J')            ((REPORT_SCROLL+=5)); DIRTY=1 ;;
+            'K')            ((REPORT_SCROLL > 4)) && ((REPORT_SCROLL-=5)) || REPORT_SCROLL=0; DIRTY=1 ;;
+            'q'|'ESC')      REPORT_MODE=0; DIRTY=1 ;;
+            $'\x03')        break ;;
+            '')             ;;
+        esac
+        continue
+    fi
+
     if (( SIDEBAR_FOCUS )); then
         case "$key" in
             'j'|'DOWN')     ((BRANCH_IDX++)); ((BRANCH_IDX >= ${#BRANCHES[@]})) && BRANCH_IDX=$((${#BRANCHES[@]}-1)); DIRTY=1 ;;
@@ -1049,7 +1156,8 @@ while true; do
             CURSOR=0; pre_render; DIRTY=1
             ;;
         '?')              HELP_ON=$(( 1 - HELP_ON )); DIRTY=1 ;;
-        'R'|'r')          REFRESH=1 ;;
+        'R')              open_report ;;
+        'r')              REFRESH=1 ;;
         '')               ;;
     esac
 done
