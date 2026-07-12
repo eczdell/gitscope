@@ -288,7 +288,7 @@ draw_diff() {
     print_status_bar
     print_hr
 
-    local vis=$((TERM_H - 4))
+    local vis=$((TERM_H - 5))
     local total=${#DIFF_LINES[@]}
     local max_s=$((total - vis))
     (( max_s < 0 )) && max_s=0
@@ -318,7 +318,7 @@ draw_diff() {
     printf '%b' "$out"
 
     print_hr
-    printf '%b' "  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
+    printf '%b' "  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -339,7 +339,7 @@ draw_files() {
     print_status_bar
     print_hr
 
-    local vis=$((TERM_H - 4))
+    local vis=$((TERM_H - 5))
     local total=${#FILES_LINES[@]}
     local max_s=$((total - vis))
     (( max_s < 0 )) && max_s=0
@@ -365,7 +365,7 @@ draw_files() {
     printf '%b' "$out"
 
     print_hr
-    printf '%b' "  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
+    printf '%b' "  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -459,7 +459,7 @@ draw_report() {
 
     print_hr
 
-    local vis=$((TERM_H - 4))
+    local vis=$((TERM_H - 5))
     if (( REPORT_EMAIL_MODE )); then
         ((vis--))
         local ac_count=${#REPORT_AC_LIST[@]}
@@ -486,7 +486,7 @@ draw_report() {
     printf '%b' "$out"
 
     print_hr
-    printf '%b' "  ${DIM}j/k${RST} ↕  ${DIM}g/G${RST} top/bot  ${DIM}/${RST} filter  ${DIM}t${RST} sort  ${DIM}b${RST} branch  ${DIM}q/Esc${RST} close${RST}${NL}"
+    printf '%b' "  ${DIM}j/k${RST} ↕  ${DIM}g/G${RST} top/bot  ${DIM}/${RST} filter  ${DIM}t${RST} sort  ${DIM}b${RST} branch  ${DIM}q/Esc${RST} close${RST}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -810,7 +810,7 @@ draw() {
 
     print_hr
 
-    local vis=$((TERM_H - 4))
+    local vis=$((TERM_H - 5))
     (( FILTER_MODE )) && ((vis--))
     (( vis < 1 )) && vis=1
 
@@ -877,9 +877,9 @@ draw() {
     fi
 
     if (( SIDEBAR_FOCUS )); then
-        printf '%b' "  ${DIM}j/k${RST} ↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}${NL}"
+        printf '%b' "  ${DIM}j/k${RST} ↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}"
     else
-        printf '%b' "  ${DIM}j/k${RST} ↕  ${DIM}d${RST} diff  ${DIM}f${RST} files  ${DIM}y${RST} copy  ${DIM}D${RST} date  ${DIM}R${RST} report  ${DIM}/${RST} filter  ${DIM}?${RST} help  ${DIM}q${RST} quit${RST}${NL}"
+        printf '%b' "  ${DIM}j/k${RST} ↕  ${DIM}d${RST} diff  ${DIM}f${RST} files  ${DIM}y${RST} copy  ${DIM}D${RST} date  ${DIM}R${RST} report  ${DIM}/${RST} filter  ${DIM}?${RST} help  ${DIM}q${RST} quit${RST}"
     fi
 }
 
