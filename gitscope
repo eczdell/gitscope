@@ -1,0 +1,947 @@
+#!/usr/bin/env bash
+# gitscope - Interactive Git History Tree Viewer
+# Just run `gitscope`. Navigate with vim keys.
+
+set -o pipefail
+
+# ═══════════════════════════════════════════════════════════════════════════
+# State
+# ═══════════════════════════════════════════════════════════════════════════
+COUNT=30
+SHOW_ALL=0
+SHOW_META=0
+COMPACT=0
+SCROLL=0
+HELP_ON=0
+DIRTY=1
+REFRESH=1
+TERM_W=80
+TERM_H=24
+
+MODE="tree"
+BRANCH_FILTER=""
+BRANCH_IDX=0
+SIDEBAR_FOCUS=0
+FILTER_TEXT=""
+FILTER_INPUT=""
+FILTER_MODE=0
+CURSOR=-1
+DESCENDANT_FILTER=""
+declare -a RENDER_TO_COMMIT=()
+declare -A DESC_SET=()
+
+DIFF_MODE=0
+DIFF_SCROLL=0
+declare -a DIFF_LINES=()
+
+FILES_MODE=0
+FILES_SCROLL=0
+declare -a FILES_LINES=()
+
+DATE_FROM=""
+DATE_TO=""
+
+CLIPBOARD_CMD=""
+MSG=""
+MSG_TIME=0
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Colors
+# ═══════════════════════════════════════════════════════════════════════════
+RST=$'\033[0m'   BLD=$'\033[1m'   DIM=$'\033[2m'   UND=$'\033[4m'
+RED=$'\033[31m'  GRN=$'\033[32m'  YEL=$'\033[33m'  BLU=$'\033[34m'
+MAG=$'\033[35m'  CYN=$'\033[36m'  WHT=$'\033[37m'  GRY=$'\033[90m'
+LRE=$'\033[91m'  LGR=$'\033[92m'  LYL=$'\033[93m'  LBL=$'\033[94m'
+LMA=$'\033[95m'  LCY=$'\033[96m'
+BCOL=("$GRN" "$LCY" "$LYL" "$LMA" "$LRE" "$LBL" "$LGR" "$CYN")
+
+ESC=$'\033'
+NL=$'\n'
+CLEAR="${ESC}[H${ESC}[2J"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Git Data
+# ═══════════════════════════════════════════════════════════════════════════
+SEP=$'\x1f'
+FMT="%H${SEP}%P${SEP}%an${SEP}%ae${SEP}%aI${SEP}%s${SEP}%D"
+
+declare -a H=() P=() A=() D=() S=() R=()
+declare -A IX=() CH=() BR_AT=() TG_AT=() BRCOL=()
+declare -a BRANCHES=() TAGS=() c_lane=()
+declare -A OCC=() IS_TIP=() TIP_BR=()
+CUR_BR="" TOTAL="" HEAD_H="" MAXL=0 NLANES=1
+
+declare -A AUTHOR_COUNT=()
+declare -a AUTHORS=()
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Render Buffer
+# ═══════════════════════════════════════════════════════════════════════════
+declare -a RENDER=()
+RENDER_N=0
+rl() { RENDER[$RENDER_N]="$1"; ((RENDER_N++)) || true; }
+
+SIDEBAR_W=32
+TREE_W=48
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Terminal
+# ═══════════════════════════════════════════════════════════════════════════
+STTY_SAVE=$(stty -g 2>/dev/null || true)
+
+cleanup() {
+    printf '%b' "${ESC}[?25h" 2>/dev/null
+    printf '%b' "${ESC}[?1049l" 2>/dev/null
+    [[ -t 0 ]] && [[ -n "$STTY_SAVE" ]] && stty "$STTY_SAVE" 2>/dev/null
+    stty sane 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'TERM_W=$(tput cols 2>/dev/null || echo 80); TERM_H=$(tput lines 2>/dev/null || echo 24); DIRTY=1' WINCH
+trap 'exit 1' INT TERM
+
+init_term() {
+    if [[ -t 0 ]] && [[ -t 1 ]]; then
+        stty -echo -icanon 2>/dev/null || true
+        printf '%b' "${ESC}[?1049h"
+        printf '%b' "${ESC}[?25l"
+    fi
+    TERM_W=$(tput cols 2>/dev/null || echo 80)
+    TERM_H=$(tput lines 2>/dev/null || echo 24)
+    for cmd in xclip xsel wl-copy pbcopy termux-clipboard-set; do
+        command -v "$cmd" &>/dev/null && { CLIPBOARD_CMD="$cmd"; break; }
+    done
+    if [[ "$CLIPBOARD_CMD" == "xclip" ]]; then
+        CLIPBOARD_CMD="xclip -selection clipboard"
+    elif [[ "$CLIPBOARD_CMD" == "xsel" ]]; then
+        CLIPBOARD_CMD="xsel --clipboard --input"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Data
+# ═══════════════════════════════════════════════════════════════════════════
+clear_data() {
+    H=(); P=(); A=(); D=(); S=(); R=()
+    BRANCHES=(); TAGS=(); c_lane=()
+    AUTHORS=()
+    MAXL=0; NLANES=1
+    IX=(); CH=(); BR_AT=(); TG_AT=(); BRCOL=()
+    OCC=(); IS_TIP=(); TIP_BR=(); AUTHOR_COUNT=()
+}
+
+fetch_data() {
+    clear_data
+
+    git rev-parse --is-inside-work-tree &>/dev/null || {
+        printf '%b' "${RED}  Not a git repository${RST}${NL}"
+        read -rsn1 -t 2 _
+        exit 1
+    }
+
+    CUR_BR=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+    mapfile -t BRANCHES < <(git for-each-ref --format='%(refname:short)' refs/heads/ | sort)
+    mapfile -t TAGS     < <(git for-each-ref --format='%(refname:short)' refs/tags/ | sort)
+    if [[ -n "$BRANCH_FILTER" ]]; then
+        TOTAL=$(git rev-list --count "$BRANCH_FILTER" 2>/dev/null || echo 0)
+    elif (( SHOW_ALL )); then
+        TOTAL=$(git rev-list --count --all 2>/dev/null || echo 0)
+    else
+        TOTAL=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+    fi
+    HEAD_H=$(git rev-parse HEAD 2>/dev/null || true)
+
+    local ci=0
+    for b in "${BRANCHES[@]}"; do
+        BRCOL["$b"]="${BCOL[$((ci % 8))]}"
+        ci=$((ci+1))
+    done
+
+    local LA=()
+    if [[ -n "$BRANCH_FILTER" ]]; then
+        LA=("$BRANCH_FILTER")
+    elif (( SHOW_ALL )); then
+        LA=(--all)
+    fi
+    mapfile -t RAW < <(git log "${LA[@]}" -n "$COUNT" --format="$FMT" 2>/dev/null)
+
+    for i in "${!RAW[@]}"; do
+        IFS="$SEP" read -r h p a ae d s r <<< "${RAW[$i]}"
+        H[$i]="$h"; P[$i]="$p"; A[$i]="$a"; D[$i]="$d"; S[$i]="$s"; R[$i]="$r"
+        IX["$h"]=$i
+        for pp in $p; do [[ -n "$pp" ]] && CH["$pp"]="${CH[$pp]:+${CH[$pp]} }$h"; done
+        AUTHOR_COUNT["$a"]=$(( ${AUTHOR_COUNT["$a"]:-0} + 1 ))
+    done
+
+    local ac=0
+    for a in "${!AUTHOR_COUNT[@]}"; do AUTHORS[ac]="$a"; ac=$((ac+1)); done
+
+    for b in "${BRANCHES[@]}"; do
+        local bh=$(git rev-parse "refs/heads/$b" 2>/dev/null || true)
+        [[ -n "$bh" && -n "${IX[$bh]+_}" ]] && {
+            local idx=${IX[$bh]}
+            BR_AT[$idx]="${BR_AT[$idx]:+${BR_AT[$idx]}, }$b"
+        }
+    done
+    for t in "${TAGS[@]}"; do
+        local th=$(git rev-parse "tags/$t" 2>/dev/null || true)
+        [[ -n "$th" && -n "${IX[$th]+_}" ]] && {
+            local idx=${IX[$th]}
+            TG_AT[$idx]="${TG_AT[$idx]:+${TG_AT[$idx]}, }$t"
+        }
+    done
+
+    for b in "${BRANCHES[@]}"; do
+        local bh=$(git rev-parse "refs/heads/$b" 2>/dev/null || true)
+        [[ -n "$bh" && -n "${IX[$bh]+_}" ]] && {
+            IS_TIP[${IX[$bh]}]=1
+            TIP_BR[${IX[$bh]}]="$b"
+        }
+    done
+
+    for i in "${!H[@]}"; do
+        local h="${H[$i]}"
+        local parents=(${P[$i]})
+        local Ln=-1
+        for l in $(seq 0 $MAXL); do [[ -z "${OCC[$l]+_}" ]] && Ln=$l && break; done
+        (( Ln == -1 )) && MAXL=$((MAXL+1)) && Ln=$MAXL
+        c_lane[$i]=$Ln; OCC[$Ln]=$h
+        for l in $(seq 0 $MAXL); do
+            local oh="${OCC[$l]:-}"
+            [[ -z "$oh" || "$oh" == "$h" ]] && continue
+            local needed=0
+            for j in $(seq $((i+1)) $((${#H[@]}-1))); do
+                for jp in ${P[$j]}; do [[ "$jp" == "$oh" ]] && needed=1 && break 2; done
+            done
+            (( needed )) || unset 'OCC[$l]'
+        done
+    done
+
+    NLANES=$((MAXL+1))
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════════════════
+strip_ansi() { sed $'s/\033\\[[0-9;]*[a-zA-Z]//g' <<< "$1"; }
+
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; echo "$s"; }
+
+vis_len() { strip_ansi "$1" | wc -L | tr -d ' '; }
+
+pad_to() {
+    local str="$1" target="$2"
+    local cur; cur=$(vis_len "$str")
+    if (( cur < target )); then
+        printf '%s%*s' "$str" $((target - cur)) ''
+    elif (( cur > target )); then
+        printf '%s' "${str:0:$target}"
+    else
+        printf '%s' "$str"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Descendant filter
+# ═══════════════════════════════════════════════════════════════════════════
+build_desc_set() {
+    DESC_SET=()
+    [[ -z "$DESCENDANT_FILTER" ]] && return
+    local -a queue=("$DESCENDANT_FILTER")
+    DESC_SET["$DESCENDANT_FILTER"]=1
+    while (( ${#queue[@]} > 0 )); do
+        local cur="${queue[0]}"
+        queue=("${queue[@]:1}")
+        local children="${CH[$cur]:-}"
+        for c in $children; do
+            [[ -z "${DESC_SET[$c]+_}" ]] && { DESC_SET["$c"]=1; queue+=("$c"); }
+        done
+    done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Diff View
+# ═══════════════════════════════════════════════════════════════════════════
+open_diff() {
+    local ci=$1
+    (( ci < 0 || ci >= ${#H[@]} )) && return
+    DIFF_HASH="${H[$ci]}"
+    mapfile -t DIFF_LINES < <(git show --format="%C(yellow)commit %h%Creset%n%an <%ae> %C(dim)%ai%Creset%n%n%s%n" --stat "$DIFF_HASH" 2>/dev/null)
+    DIFF_SCROLL=0
+    DIFF_MODE=1
+    DIRTY=1
+}
+
+draw_diff() {
+    local out=""
+    out+="$CLEAR"
+    out+="${BLD}${CYN}  🔭  gitscope${RST}  ${DIM}│${RST}  ${BLD}${YEL}Commit diff${RST}  ${DIM}${DIFF_HASH:0:7}${RST}$NL"
+    out+="${DIM}"
+    local hr=""
+    for _ in $(seq 1 $TERM_W); do hr+="─"; done
+    out+="${hr}${RST}$NL"
+
+    local vis=$((TERM_H - 4))
+    local total=${#DIFF_LINES[@]}
+    local max_s=$((total - vis))
+    (( max_s < 0 )) && max_s=0
+    (( DIFF_SCROLL > max_s )) && DIFF_SCROLL=$max_s
+    (( DIFF_SCROLL < 0 )) && DIFF_SCROLL=0
+
+    local drawn=0
+    local idx=$DIFF_SCROLL
+    while (( drawn < vis && idx < total )); do
+        local line="${DIFF_LINES[$idx]}"
+        if [[ "$line" == *"diff --git"* ]]; then
+            out+="${BLD}${LGR}${line}${RST}$NL"
+        elif [[ "$line" == *"@@"* ]]; then
+            out+="${BLD}${CYN}${line}${RST}$NL"
+        elif [[ "$line" == *"+"* ]] && [[ "$line" != *"+++"* ]]; then
+            out+="${LGR}${line}${RST}$NL"
+        elif [[ "$line" == *"-"* ]] && [[ "$line" != *"---"* ]]; then
+            out+="${LRE}${line}${RST}$NL"
+        else
+            out+="${line}$NL"
+        fi
+        ((drawn++))
+        ((idx++))
+    done
+    while (( drawn < vis )); do out+="$NL"; ((drawn++)); done
+
+    local hr2=""
+    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
+    out+="${DIM}${hr2}${RST}$NL"
+    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}$NL"
+
+    printf '%b' "$out"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Changed Files View
+# ═══════════════════════════════════════════════════════════════════════════
+open_files() {
+    local ci=$1
+    (( ci < 0 || ci >= ${#H[@]} )) && return
+    local hash="${H[$ci]}"
+    mapfile -t FILES_LINES < <(git diff-tree --no-commit-id -r --stat "$hash" 2>/dev/null)
+    FILES_SCROLL=0
+    FILES_MODE=1
+    DIRTY=1
+}
+
+draw_files() {
+    local out=""
+    out+="$CLEAR"
+    out+="${BLD}${CYN}  🔭  gitscope${RST}  ${DIM}│${RST}  ${BLD}${LYL}Changed files${RST}  ${DIM}${DIFF_HASH:0:7}${RST}$NL"
+    out+="${DIM}"
+    local hr=""
+    for _ in $(seq 1 $TERM_W); do hr+="─"; done
+    out+="${hr}${RST}$NL"
+
+    local vis=$((TERM_H - 4))
+    local total=${#FILES_LINES[@]}
+    local max_s=$((total - vis))
+    (( max_s < 0 )) && max_s=0
+    (( FILES_SCROLL > max_s )) && FILES_SCROLL=$max_s
+    (( FILES_SCROLL < 0 )) && FILES_SCROLL=0
+
+    local drawn=0
+    local idx=$FILES_SCROLL
+    while (( drawn < vis && idx < total )); do
+        local line="${FILES_LINES[$idx]}"
+        if [[ "$line" == *"│"* ]]; then
+            out+="  ${DIM}${line}${RST}$NL"
+        elif [[ "$line" == *"file changed"* ]] || [[ "$line" == *"files changed"* ]]; then
+            out+="${BLD}${line}${RST}$NL"
+        else
+            out+="  ${line}$NL"
+        fi
+        ((drawn++))
+        ((idx++))
+    done
+    while (( drawn < vis )); do out+="$NL"; ((drawn++)); done
+
+    local hr2=""
+    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
+    out+="${DIM}${hr2}${RST}$NL"
+    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}$NL"
+
+    printf '%b' "$out"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Message display
+# ═══════════════════════════════════════════════════════════════════════════
+show_msg() { MSG="$1"; MSG_TIME=$(date +%s); }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pre-render
+# ═══════════════════════════════════════════════════════════════════════════
+pre_render() {
+    RENDER=(); RENDER_N=0; RENDER_TO_COMMIT=()
+
+    if (( ${#H[@]} == 0 )); then
+        rl "  ${DIM}No commits to display${RST}"
+        return
+    fi
+
+    local GA_W=$((NLANES * 2 + 4))
+    local PREFIX_W=$((4 + GA_W + 1))
+    local HASH_W=8
+    local AUTH_W=14
+    local DATE_W=12
+    local SUBJ_W=$(( TREE_W - PREFIX_W - HASH_W - AUTH_W - DATE_W - 6 ))
+    (( SUBJ_W < 10 )) && SUBJ_W=10
+
+    local FL=""
+    [[ -n "$FILTER_TEXT" ]] && FL=$(echo "$FILTER_TEXT" | tr '[:upper:]' '[:lower:]')
+
+    local has_desc=0
+    [[ -n "$DESCENDANT_FILTER" ]] && has_desc=1
+
+    for i in "${!H[@]}"; do
+        if [[ -n "$FL" ]]; then
+            local h_lower="${H[$i],,}"
+            local s_lower="${S[$i],,}"
+            local a_lower="${A[$i],,}"
+            [[ "$h_lower" != *"$FL"* && "$s_lower" != *"$FL"* && "$a_lower" != *"$FL"* ]] && continue
+        fi
+
+        if (( has_desc )); then
+            [[ -z "${DESC_SET[${H[$i]}]+_}" ]] && continue
+        fi
+
+        local hash="${H[$i]}"
+        local lane="${c_lane[$i]}"
+        local parents=(${P[$i]})
+        local np=${#parents[@]}
+
+        local short="${hash:0:7}"
+        local subj="${S[$i]:0:$SUBJ_W}"
+        (( ${#S[$i]} > SUBJ_W )) && subj+="…"
+        local auth="${A[$i]:0:12}"
+        local dt="${D[$i]:0:10}"
+
+        local ncol="${GRN}" nchar="●"
+        (( np > 1 )) && { ncol="${YEL}"; nchar="◆"; }
+        (( ${IS_TIP[$i]:-0} )) && { ncol="${BRCOL[${TIP_BR[$i]}]}"; nchar="◉"; }
+        [[ "$hash" == "$HEAD_H" ]] && { ncol="${LRE}"; nchar="▶"; }
+
+        local graph=""
+        for l in $(seq 0 $MAXL); do
+            if (( l == lane )); then
+                graph+="${ncol}${BLD}${nchar}${RST}"
+            else
+                local oh="${OCC[$l]:-}"
+                local show=0
+                if [[ -n "$oh" ]]; then
+                    for j in $(seq $((i+1)) $((${#H[@]}-1))); do
+                        for jp in ${P[$j]}; do [[ "$jp" == "$oh" ]] && show=1 && break 2; done
+                    done
+                fi
+                if (( ! show )); then
+                    for pp in "${parents[@]}"; do
+                        [[ -n "${IX[$pp]+_}" ]] && (( ${c_lane[${IX[$pp]}]} == l )) && show=1 && break
+                    done
+                fi
+                (( show )) && graph+="${DIM}│${RST}" || graph+=" "
+            fi
+        done
+
+        if (( np > 1 )); then
+            for pi in $(seq 1 $((np-1))); do
+                local pp="${parents[$pi]}"
+                [[ -n "${IX[$pp]+_}" ]] || continue
+                local pl="${c_lane[${IX[$pp]}]}"
+                (( pl < lane )) && graph+="${YEL}╮${RST}"
+                (( pl > lane )) && graph+="${YEL}╭${RST}"
+            done
+        fi
+
+        local gs; gs=$(strip_ansi "$graph")
+        local gv=${#gs}
+        (( gv < GA_W )) && graph+="$(printf '%0.s ' $(seq 1 $((GA_W - gv))))"
+
+        local box=""
+        box+="${ncol}╰─${RST} ${BLD}${CYN}${short}${RST}"
+
+        if [[ -n "${BR_AT[$i]}" ]]; then
+            IFS=',' read -ra _refs <<< "${BR_AT[$i]}"
+            for ref in "${_refs[@]}"; do
+                ref=$(trim "$ref")
+                [[ -z "$ref" ]] && continue
+                local bc="${BRCOL[$ref]:-$WHT}"
+                local cu=""; [[ "$ref" == "$CUR_BR" ]] && cu="${BLD}"
+                box+=" ${bc}${cu}${ref}${RST}"
+            done
+        fi
+        if [[ -n "${TG_AT[$i]}" ]]; then
+            IFS=',' read -ra _tags <<< "${TG_AT[$i]}"
+            for tag in "${_tags[@]}"; do
+                tag=$(trim "$tag")
+                [[ -z "$tag" ]] && continue
+                box+=" ${YEL}🏷${tag}${RST}"
+            done
+        fi
+
+        box+="  ${WHT}${subj}${RST}"
+        box+="  ${DIM}${auth} · ${dt}${RST}"
+
+        local cur_idx=$((RENDER_N))
+        RENDER_TO_COMMIT[$cur_idx]=$i
+
+        local pfx; pfx=$(printf '  %3s ' "$i")
+        rl "${pfx}${graph} ${box}"
+
+        if (( SHOW_META )); then
+            local mindent=""
+            for _ in $(seq 1 $((4 + GA_W + 2))); do mindent+=" "; done
+            local mline="${mindent}${GRY}${hash}${RST}  ${GRY}${D[$i]:11:8}${RST}"
+            (( np > 1 )) && mline+="  ${YEL}⟶ merge${RST}"
+            (( np == 0 )) && mline+="  ${GRN}⟶ root${RST}"
+            local meta_idx=$RENDER_N
+            RENDER_TO_COMMIT[$meta_idx]=$i
+            rl "$mline"
+        fi
+
+        if (( ! COMPACT && i < ${#H[@]}-1 )); then
+            local conn=""
+            for l in $(seq 0 $MAXL); do
+                if (( l == lane )); then
+                    conn+="${DIM}│${RST}"
+                else
+                    local oh="${OCC[$l]:-}"
+                    local show=0
+                    if [[ -n "$oh" ]]; then
+                        for j in $(seq $((i+1)) $((${#H[@]}-1))); do
+                            for jp in ${P[$j]}; do [[ "$jp" == "$oh" ]] && show=1 && break 2; done
+                        done
+                    fi
+                    (( show )) && conn+="${DIM}│${RST}" || conn+=" "
+                fi
+            done
+            local cs; cs=$(strip_ansi "$conn")
+            local cv=${#cs}
+            (( cv < GA_W )) && conn+="$(printf '%0.s ' $(seq 1 $((GA_W - cv))))"
+            local conn_idx=$RENDER_N
+            RENDER_TO_COMMIT[$conn_idx]=$i
+            rl "$(printf '  %4s' '')${conn}"
+        fi
+    done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sidebar
+# ═══════════════════════════════════════════════════════════════════════════
+declare -a SIDEBAR_LINES=()
+
+build_sidebar() {
+    local vis=$1
+    SIDEBAR_LINES=()
+
+    local nb=${#BRANCHES[@]}
+    local na=${#AUTHORS[@]}
+
+    local half=$((vis / 2))
+    local br_vis=$half
+    (( br_vis < 3 )) && br_vis=3
+    local au_vis=$((vis - br_vis))
+
+    local inner=$((SIDEBAR_W - 2))
+
+    local sep=""
+    for _ in $(seq 1 $SIDEBAR_W); do sep+="─"; done
+
+    SIDEBAR_LINES+=(" ${BLD}${LBL}Branches${RST}${DIM}(${nb})${RST}")
+    local br_start=0
+    local br_end=$((br_vis - 1))
+    (( br_end > nb )) && br_end=$nb
+
+    for ((bi=br_start; bi<br_end; bi++)); do
+        local b="${BRANCHES[$bi]}"
+        local bc="${BRCOL[$b]}"
+        local marker="  "
+        if (( SIDEBAR_FOCUS )); then
+            (( bi == BRANCH_IDX )) && marker="${BLD}${LGR}▸${RST} "
+        fi
+        local cur=""; [[ "$b" == "$CUR_BR" ]] && cur="${DIM} ⊕${RST}"
+        local filt=""; [[ "$b" == "$BRANCH_FILTER" ]] && filt=" ${YEL}✓${RST}"
+        local cnt=$(git rev-list --count "$b" 2>/dev/null || echo "?")
+        local line=" ${marker}${bc}◉${RST} ${BLD}${b}${RST}${cur}${filt} ${DIM}${cnt}${RST}"
+        SIDEBAR_LINES+=("$line")
+    done
+
+    while (( ${#SIDEBAR_LINES[@]} < br_vis )); do
+        SIDEBAR_LINES+=("")
+    done
+
+    SIDEBAR_LINES+=("${DIM}${sep}${RST}")
+
+    local au_start=$(( ${#SIDEBAR_LINES[@]} ))
+    SIDEBAR_LINES+=(" ${BLD}${LMA}Authors${RST}${DIM}(${na})${RST}")
+
+    local mc=0
+    for a in "${!AUTHOR_COUNT[@]}"; do
+        (( ${AUTHOR_COUNT[$a]} > mc )) && mc=${AUTHOR_COUNT[$a]}
+    done
+
+    local bar_total=$((inner - 18))
+    (( bar_total < 5 )) && bar_total=5
+
+    local au_done=0
+    for ((ai=0; ai<na && au_done < au_vis - 1; ai++)); do
+        local a="${AUTHORS[$ai]}"
+        local cnt="${AUTHOR_COUNT[$a]}"
+        local bl=$(( cnt * bar_total / (mc > 0 ? mc : 1) ))
+        local bar="" emp=""
+        for _ in $(seq 1 $bl); do bar+="█"; done
+        for _ in $(seq $((bl+1)) $bar_total); do emp+="░"; done
+        local bcol="${BCOL[$((ai % 8))]}"
+        local aname="${a:0:12}"
+        local line
+        line=$(printf " ${bcol}%-12s${RST} ${bcol}%s${RST}${DIM}%s${RST} ${GRY}%d${RST}" "$aname" "$bar" "$emp" "$cnt")
+        SIDEBAR_LINES+=("$line")
+        ((au_done++))
+    done
+
+    while (( ${#SIDEBAR_LINES[@]} < vis )); do
+        SIDEBAR_LINES+=("")
+    done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Draw
+# ═══════════════════════════════════════════════════════════════════════════
+draw() {
+    TERM_W=$(tput cols 2>/dev/null || echo 80)
+    TERM_H=$(tput lines 2>/dev/null || echo 24)
+
+    SIDEBAR_W=32
+    (( TERM_W < 60 )) && SIDEBAR_W=0
+    TREE_W=$((TERM_W - SIDEBAR_W - 1))
+    (( TREE_W < 20 )) && TREE_W=20
+
+    local out=""
+    out+="$CLEAR"
+
+    out+="${BLD}${CYN}  🔭  gitscope${RST}$NL"
+
+    if (( FILTER_MODE )); then
+        out+="  ${BLD}${LGR}/${RST}${BLD}${FILTER_INPUT}${RST}${DIM}█ Esc to cancel${RST}$NL"
+    elif [[ -n "$FILTER_TEXT" ]]; then
+        out+="  ${BLD}${LGR}/${RST}${BLD}${FILTER_TEXT}${RST}  ${DIM}Esc to clear${RST}$NL"
+    fi
+
+    if [[ -n "$DESCENDANT_FILTER" ]]; then
+        out+="  ${BLD}${LYL}▼${RST} ${DIM}Descendants of${RST} ${BLD}${CYN}${DESCENDANT_FILTER:0:7}${RST}  ${DIM}Esc/0 to clear${RST}$NL"
+    fi
+
+    local flt=""
+    flt+="  ${DIM}Branch:${RST} "
+    if [[ -n "$BRANCH_FILTER" ]]; then
+        flt+="${BLD}${YEL}${BRANCH_FILTER}${RST}"
+    elif (( SHOW_ALL )); then
+        flt+="${DIM}all branches${RST}"
+    else
+        flt+="${GRN}${BLD}${CUR_BR}${RST}"
+    fi
+
+    flt+="  ${DIM}│${RST}  "
+    flt+="${WHT}${#H[@]}/${TOTAL}${RST} ${DIM}commits${RST}"
+
+    flt+="  ${DIM}│${RST}  "
+    (( SHOW_ALL )) && flt+="${LYL}${BLD}ALL${RST}" || flt+="${DIM}ALL${RST}"
+    flt+="  "
+    (( SHOW_META )) && flt+="${LYL}${BLD}META${RST}" || flt+="${DIM}META${RST}"
+    flt+="  "
+    (( COMPACT )) && flt+="${LYL}${BLD}CMP${RST}" || flt+="${DIM}CMP${RST}"
+
+    if [[ -n "$BRANCH_FILTER" ]]; then
+        flt+="  ${DIM}│${RST}  ${DIM}Press ${GRY}0${RST}${DIM} to reset${RST}"
+    fi
+
+    out+="${flt}$NL"
+
+    local hr_line=""
+    for _ in $(seq 1 $TERM_W); do hr_line+="═"; done
+    out+="${DIM}${hr_line}${RST}$NL"
+
+    local vis=$((TERM_H - 4))
+    (( FILTER_MODE )) && ((vis--))
+    [[ -n "$FILTER_TEXT" ]] && ((vis--))
+    [[ -n "$DESCENDANT_FILTER" ]] && ((vis--))
+    (( vis < 1 )) && vis=1
+
+    local max_scroll=$((RENDER_N - vis))
+    (( max_scroll < 0 )) && max_scroll=0
+
+    if (( CURSOR >= 0 )); then
+        (( CURSOR < SCROLL )) && SCROLL=$CURSOR
+        (( CURSOR >= SCROLL + vis )) && SCROLL=$((CURSOR - vis + 1))
+    fi
+    (( SCROLL > max_scroll )) && SCROLL=$max_scroll
+    (( SCROLL < 0 )) && SCROLL=0
+
+    if (( HELP_ON )); then
+        draw_help "$out" "$vis"
+        return
+    fi
+
+    if (( SIDEBAR_W > 0 )); then
+        build_sidebar "$vis"
+
+        local drawn=0
+        local vl="${DIM}│${RST}"
+        for ((idx=SCROLL; idx<RENDER_N && drawn<vis; idx++)); do
+            local tl; tl=$(pad_to "${RENDER[$idx]}" "$TREE_W")
+            if (( idx == CURSOR )); then
+                tl="${YEL}▸${tl:7}${RST}"
+            fi
+            local sl="${SIDEBAR_LINES[$drawn]:-}"
+            local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
+            out+="${tl}${vl}${sl_padded}$NL"
+            ((drawn++))
+        done
+        for ((; drawn<vis; drawn++)); do
+            local padding=""
+            for _ in $(seq 1 $TREE_W); do padding+=" "; done
+            local sl="${SIDEBAR_LINES[$drawn]:-}"
+            local sl_padded; sl_padded=$(pad_to "$sl" "$SIDEBAR_W")
+            out+="${padding}${vl}${sl_padded}$NL"
+        done
+    else
+        local drawn=0
+        for ((idx=SCROLL; idx<RENDER_N && drawn<vis; idx++)); do
+            if (( idx == CURSOR )); then
+                out+="${YEL}▸${RENDER[$idx]:7}${RST}$NL"
+            else
+                out+="${RENDER[$idx]}$NL"
+            fi
+            ((drawn++))
+        done
+        for ((; drawn<vis; drawn++)); do out+="$NL"; done
+    fi
+
+    local hr2=""
+    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
+    out+="${DIM}${hr2}${RST}$NL"
+
+    if (( SIDEBAR_FOCUS )); then
+        out+="  ${DIM}j/k${RST}↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}$NL"
+    else
+        out+="  ${DIM}j/k${RST}↕ cursor  ${DIM}Enter/o${RST}zoom  ${DIM}0${RST}reset  ${DIM}/${RST}filter  ${DIM}b${RST}branch  ${DIM}?${RST}help  ${DIM}q${RST}quit${RST}$NL"
+    fi
+
+    printf '%b' "$out"
+}
+
+draw_help() {
+    local out="$1" vis="$2"
+    local hx=$(( (TERM_W - 54) / 2 ))
+    (( hx < 2 )) && hx=2
+    local hpfx=""
+    for _ in $(seq 1 $hx); do hpfx+=" "; done
+
+    out+="$NL"
+    out+="${hpfx}${BLD}${CYN}╔════════════════════════════════════════════════════╗${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}  ${BLD}gitscope - Interactive Git Tree Viewer${RST}          ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}╠════════════════════════════════════════════════════╣${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}  ${BLD}Navigation${RST}                                      ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LGR}j${RST} / ${LGR}↓${RST}       Move cursor down                  ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LGR}k${RST} / ${LGR}↑${RST}       Move cursor up                    ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LGR}J${RST} / ${LGR}K${RST}       Move 5 lines                     ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LGR}g${RST} / ${LGR}G${RST}       Top / Bottom                      ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LGR}PgUp/PgDn${RST}   Page up/down                      ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}╠════════════════════════════════════════════════════╣${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}  ${BLD}Actions${RST}                                          ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}Enter/o${RST}     Zoom into commit descendants      ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}/${RST}           Filter commits (inline)          ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}R${RST}           Refresh data                      ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}╠════════════════════════════════════════════════════╣${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}  ${BLD}Display${RST}                                          ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}a${RST}           Toggle all branches                ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}m${RST}           Toggle commit metadata             ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}c${RST}           Toggle compact mode                ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LYL}+${RST} / ${LYL}-${RST}         ±10 commits                       ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}╠════════════════════════════════════════════════════╣${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}  ${BLD}Sidebar${RST}                                           ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LBL}b${RST}           Focus branch picker (sidebar)     ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LBL}0${RST}           Reset all filters                 ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LBL}ESC${RST}          Clear zoom filter                  ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}╠════════════════════════════════════════════════════╣${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LRE}?${RST}           Toggle this help                  ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}║${RST}    ${LRE}q${RST} / ${LRE}Ctrl-C${RST}    Quit                              ${BLD}${CYN}║${RST}$NL"
+    out+="${hpfx}${BLD}${CYN}╚════════════════════════════════════════════════════╝${RST}$NL"
+
+    local remain=$((vis - 22))
+    (( remain < 0 )) && remain=0
+    for _ in $(seq 1 $remain); do out+="$NL"; done
+
+    local hr2=""
+    for _ in $(seq 1 $TERM_W); do hr2+="─"; done
+    out+="${DIM}${hr2}${RST}$NL"
+    out+="  ${DIM}?${RST} close  ${DIM}q${RST} quit${RST}$NL"
+
+    printf '%b' "$out"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Input
+# ═══════════════════════════════════════════════════════════════════════════
+LAST_KEY=""
+read_key() {
+    local key=""
+    if IFS= read -rsn1 -t 0.033 key 2>/dev/null; then
+        if [[ -z "$key" ]]; then
+            LAST_KEY=$'\x0a'
+            return
+        fi
+    else
+        LAST_KEY=""
+        return
+    fi
+
+    if [[ "$key" == $'\x1b' ]]; then
+        local s1="" s2=""
+        IFS= read -rsn1 -t 0.05 s1 2>/dev/null || true
+        if [[ -z "$s1" ]]; then
+            LAST_KEY="ESC"
+            return
+        fi
+        [[ "$s1" != '[' ]] && { LAST_KEY=""; return; }
+        IFS= read -rsn1 -t 0.05 s2 2>/dev/null || true
+        case "$s2" in
+            A) LAST_KEY="UP" ;;
+            B) LAST_KEY="DOWN" ;;
+            5) LAST_KEY="PAGEUP" ;;
+            6) LAST_KEY="PAGEDOWN" ;;
+            H) LAST_KEY="HOME" ;;
+            F) LAST_KEY="END" ;;
+            *) LAST_KEY="" ;;
+        esac
+        return
+    fi
+
+    LAST_KEY="$key"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════════════
+init_term
+
+while true; do
+    if (( REFRESH )); then
+        fetch_data
+        [[ -n "$DESCENDANT_FILTER" ]] && build_desc_set
+        pre_render
+        DIRTY=1
+        REFRESH=0
+        (( CURSOR < 0 )) && CURSOR=0
+        (( CURSOR >= RENDER_N )) && CURSOR=$((RENDER_N-1))
+    fi
+
+    if (( DIRTY )); then
+        draw
+        DIRTY=0
+    fi
+
+    read_key
+    key="$LAST_KEY"
+
+    if (( FILTER_MODE )); then
+        case "$key" in
+            $'\x0a'|$'\x0d') FILTER_MODE=0; DIRTY=1 ;;
+            'ESC')           FILTER_INPUT=""; FILTER_TEXT=""
+                             FILTER_MODE=0; pre_render; DIRTY=1 ;;
+            $'\x7f'|$'\x08') FILTER_INPUT="${FILTER_INPUT%?}"
+                             FILTER_TEXT="$FILTER_INPUT"
+                             SCROLL=0; pre_render; DIRTY=1 ;;
+            $'\x03')         break ;;
+            '')              ;;
+            *)               FILTER_INPUT+="$key"
+                             FILTER_TEXT="$FILTER_INPUT"
+                             SCROLL=0; pre_render; DIRTY=1 ;;
+        esac
+        continue
+    fi
+
+    if (( SIDEBAR_FOCUS )); then
+        case "$key" in
+            'j'|'DOWN')     ((BRANCH_IDX++)); ((BRANCH_IDX >= ${#BRANCHES[@]})) && BRANCH_IDX=$((${#BRANCHES[@]}-1)); DIRTY=1 ;;
+            'k'|'UP')       ((BRANCH_IDX > 0)) && ((BRANCH_IDX--)); DIRTY=1 ;;
+            'g')            BRANCH_IDX=0; DIRTY=1 ;;
+            'G')            BRANCH_IDX=$((${#BRANCHES[@]}-1)); DIRTY=1 ;;
+            $'\x0a'|$'\x0d') BRANCH_FILTER="${BRANCHES[$BRANCH_IDX]}"
+                             SIDEBAR_FOCUS=0; MODE="tree"; REFRESH=1 ;;
+            '0')            BRANCH_FILTER=""; SIDEBAR_FOCUS=0; MODE="tree"; REFRESH=1 ;;
+            'ESC'|'b'|'q')  SIDEBAR_FOCUS=0; DIRTY=1 ;;
+            '')             ;;
+        esac
+        continue
+    fi
+
+    case "$key" in
+        $'\x03'|'q'|'Q')  break ;;
+        'j'|'DOWN')       ci="${RENDER_TO_COMMIT[$CURSOR]:-}"; n=$((CURSOR+1))
+                          while (( n < RENDER_N )); do
+                              [[ "${RENDER_TO_COMMIT[$n]:-}" != "$ci" ]] && break
+                              ((n++))
+                          done
+                          (( n < RENDER_N )) && CURSOR=$n
+                          DIRTY=1 ;;
+        'k'|'UP')         ci="${RENDER_TO_COMMIT[$CURSOR]:-}"; n=$((CURSOR-1))
+                          while (( n >= 0 )); do
+                              [[ "${RENDER_TO_COMMIT[$n]:-}" != "$ci" ]] && break
+                              ((n--))
+                          done
+                          (( n >= 0 )) && CURSOR=$n
+                          DIRTY=1 ;;
+        'J')              cnt=0; ci="${RENDER_TO_COMMIT[$CURSOR]:-}"; n=$CURSOR
+                          while (( cnt < 5 && n < RENDER_N-1 )); do
+                              ((n++))
+                              [[ "${RENDER_TO_COMMIT[$n]:-}" != "$ci" ]] && { ci="${RENDER_TO_COMMIT[$n]}"; ((cnt++)); }
+                          done
+                          CURSOR=$n; DIRTY=1 ;;
+        'K')              cnt=0; ci="${RENDER_TO_COMMIT[$CURSOR]:-}"; n=$CURSOR
+                          while (( cnt < 5 && n > 0 )); do
+                              ((n--))
+                              [[ "${RENDER_TO_COMMIT[$n]:-}" != "$ci" ]] && { ci="${RENDER_TO_COMMIT[$n]}"; ((cnt++)); }
+                          done
+                          CURSOR=$n; DIRTY=1 ;;
+        'g')              CURSOR=0; DIRTY=1 ;;
+        'G')              CURSOR=$((RENDER_N-1)); DIRTY=1 ;;
+        'PAGEUP')         ((CURSOR -= TERM_H - 4)); (( CURSOR < 0 )) && CURSOR=0; DIRTY=1 ;;
+        'PAGEDOWN')       ((CURSOR += TERM_H - 4)); ((CURSOR > RENDER_N-1)) && CURSOR=$((RENDER_N-1)); DIRTY=1 ;;
+        'HOME')           CURSOR=0; DIRTY=1 ;;
+        'END')            CURSOR=$((RENDER_N-1)); DIRTY=1 ;;
+        'a')              SHOW_ALL=$(( 1 - SHOW_ALL )); BRANCH_FILTER=""; FILTER_TEXT=""
+                          DESCENDANT_FILTER=""; REFRESH=1 ;;
+        'm')              SHOW_META=$(( 1 - SHOW_META )); pre_render; DIRTY=1 ;;
+        'c')              COMPACT=$(( 1 - COMPACT )); pre_render; DIRTY=1 ;;
+        '+')              ((COUNT += 10)); ((COUNT > 200)) && COUNT=200; REFRESH=1 ;;
+        '-')              ((COUNT > 10)) && ((COUNT -= 10)); REFRESH=1 ;;
+        'b')              SIDEBAR_FOCUS=1; BRANCH_IDX=0; DIRTY=1 ;;
+        '0')              BRANCH_FILTER=""; FILTER_TEXT=""; DESCENDANT_FILTER=""; REFRESH=1 ;;
+        '/')              FILTER_MODE=1; FILTER_INPUT=""; DIRTY=1 ;;
+        'o'|$'\x0a'|$'\x0d')
+            if (( CURSOR >= 0 && CURSOR < RENDER_N )); then
+                ci=${RENDER_TO_COMMIT[$CURSOR]}
+                if [[ -n "$ci" ]]; then
+                    DESCENDANT_FILTER="${H[$ci]}"
+                    build_desc_set
+                    CURSOR=0
+                    pre_render
+                    DIRTY=1
+                fi
+            fi
+            ;;
+        'ESC')
+            if [[ -n "$DESCENDANT_FILTER" ]]; then
+                DESCENDANT_FILTER=""; CURSOR=0; pre_render; DIRTY=1
+            fi
+            ;;
+        '?')              HELP_ON=$(( 1 - HELP_ON )); DIRTY=1 ;;
+        'R'|'r')          REFRESH=1 ;;
+        '')               ;;
+    esac
+done
