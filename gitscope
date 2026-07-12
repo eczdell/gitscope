@@ -384,20 +384,15 @@ open_report() {
     for _ in $(seq 1 62); do hr2+="-"; done
 
     local data
-    data=$(find . -type f -name "*.py" ! -path "./.git/*" 2>/dev/null | while read f; do
-        local filename
-        filename=$(basename "$f")
-        local relpath="${f#./}"
-        local info
-        info=$(git log --diff-filter=A --format="%ae|%ad" --date=short -- "$relpath" 2>/dev/null | head -n 1)
-        local email
-        email=$(echo "$info" | cut -d'|' -f1)
-        local date
-        date=$(echo "$info" | cut -d'|' -f2)
-        [[ -n "$email" ]] && echo "${email}|${filename}|${date}"
-    done | sort -t"|" -k1,1)
+    data=$(git log --diff-filter=A --format="%ae|%ad" --date=short --name-only 2>/dev/null | awk -F'|' '
+        /^[0-9a-f]{40}\|/ { email=$1; date=$2; next }
+        NF && email { print email "|" $0 "|" date; email="" }
+    ' | sort -t"|" -k1,1)
 
-    [[ -z "$data" ]] && { REPORT_LINES+=("  ${DIM}No file data found${RST}"); REPORT_SCROLL=0; REPORT_MODE=1; DIRTY=1; return; }
+    [[ -z "$data" ]] && {
+        REPORT_LINES+=("  ${DIM}No file data found${RST}")
+        REPORT_SCROLL=0; REPORT_MODE=1; DIRTY=1; return
+    }
 
     REPORT_LINES+=("${BLD}${hr}${RST}")
     REPORT_LINES+=("${BLD}                    FILES BY AUTHOR${RST}")
@@ -415,9 +410,11 @@ open_report() {
             REPORT_LINES+=("${DIM}------------------------------------------------------------${RST}")
             current_email="$email"
         fi
-        local padding=$(( 48 - ${#filename} ))
+        local bname
+        bname=$(basename "$filename")
+        local padding=$(( 48 - ${#bname} ))
         (( padding < 2 )) && padding=2
-        REPORT_LINES+=("  ${LYL}${filename}${RST}$(printf '%*s' $padding '')${DIM}${date}${RST}")
+        REPORT_LINES+=("  ${LYL}${bname}${RST}$(printf '%*s' $padding '')${DIM}${date}${RST}")
     done <<< "$data"
 
     REPORT_LINES+=("")
