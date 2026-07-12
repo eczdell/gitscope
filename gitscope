@@ -48,6 +48,10 @@ MSG_TIME=0
 REPORT_MODE=0
 REPORT_SCROLL=0
 declare -a REPORT_LINES=()
+REPORT_EMAIL_FILTER=""
+REPORT_EMAIL_INPUT=""
+REPORT_EMAIL_MODE=0
+REPORT_SORT="name"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Colors
@@ -388,12 +392,24 @@ open_report() {
         /^COMMIT:/ { split($0, a, ":"); split(a[2], b, "|"); email=b[1]; date=b[2]; next }
         /^$/ { next }
         NF { print email "|" $0 "|" date }
-    ' | sort -u -t"|" -k1,2 | sort -t"|" -k1,1)
+    ' | sort -u -t"|" -k1,2)
 
     [[ -z "$data" ]] && {
         REPORT_LINES+=("  ${DIM}No file data found${RST}")
         REPORT_SCROLL=0; REPORT_MODE=1; DIRTY=1; return
     }
+
+    if [[ -n "$REPORT_EMAIL_FILTER" ]]; then
+        data=$(echo "$data" | grep -i "$REPORT_EMAIL_FILTER" 2>/dev/null || true)
+        [[ -z "$data" ]] && {
+            REPORT_LINES+=("  ${DIM}No files found for: ${REPORT_EMAIL_FILTER}${RST}")
+            REPORT_SCROLL=0; REPORT_MODE=1; DIRTY=1; return
+        }
+    fi
+
+    if [[ "$REPORT_SORT" == "date" ]]; then
+        data=$(echo "$data" | sort -t"|" -k3,3 -r)
+    fi
 
     REPORT_LINES+=("${BLD}${hr}${RST}")
     REPORT_LINES+=("${BLD}                    FILES BY AUTHOR${RST}")
@@ -421,20 +437,41 @@ open_report() {
     REPORT_LINES+=("")
     REPORT_LINES+=("${BLD}${hr}${RST}")
 
-    REPORT_SCROLL=0
     REPORT_MODE=1
-    DIRTY=1
 }
 
 draw_report() {
     local out=""
     out+="$CLEAR"
     out+="${BLD}${CYN}  🔭  gitscope${RST}  ${DIM}│${RST}  ${BLD}${LYL}Report: files by author${RST}$NL"
+
+    if (( REPORT_EMAIL_MODE )); then
+        out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_INPUT}${RST}${DIM}█ Esc to cancel${RST}$NL"
+        local suggestions
+        suggestions=$(git log --format="%ae" 2>/dev/null | sort -u | grep -i "^${REPORT_EMAIL_INPUT}" 2>/dev/null | head -3)
+        if [[ -n "$suggestions" ]]; then
+            while IFS= read -r sug; do
+                out+="  ${DIM}  → ${sug}${RST}$NL"
+            done <<< "$suggestions"
+        fi
+    elif [[ -n "$REPORT_EMAIL_FILTER" ]]; then
+        out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_FILTER}${RST}  ${DIM}Esc to clear${RST}$NL"
+    fi
+
+    if [[ "$REPORT_SORT" == "date" ]]; then
+        out+="  ${DIM}Sorted by: ${GRN}date${RST}  ${DIM}(t to toggle)${RST}$NL"
+    fi
+
     local hr=""
     for _ in $(seq 1 $TERM_W); do hr+="─"; done
     out+="${DIM}${hr}${RST}$NL"
 
     local vis=$((TERM_H - 4))
+    (( REPORT_EMAIL_MODE )) && ((vis--))
+    [[ -n "$REPORT_EMAIL_FILTER" ]] && ((vis--))
+    [[ "$REPORT_SORT" == "date" ]] && ((vis--))
+    (( vis < 1 )) && vis=1
+
     local total=${#REPORT_LINES[@]}
     local max_s=$((total - vis))
     (( max_s < 0 )) && max_s=0
@@ -453,7 +490,7 @@ draw_report() {
     local hr2=""
     for _ in $(seq 1 $TERM_W); do hr2+="─"; done
     out+="${DIM}${hr2}${RST}$NL"
-    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}$NL"
+    out+="  ${DIM}j/k${RST}↕  ${DIM}g/G${RST}top/bot  ${DIM}/${RST}filter  ${DIM}t${RST}sort  ${DIM}q/Esc${RST} close${RST}$NL"
 
     printf '%b' "$out"
 }
@@ -1024,12 +1061,35 @@ while true; do
     fi
 
     if (( REPORT_MODE )); then
+        if (( REPORT_EMAIL_MODE )); then
+            case "$key" in
+                $'\x0a'|$'\x0d') REPORT_EMAIL_FILTER="$REPORT_EMAIL_INPUT"
+                                 REPORT_EMAIL_MODE=0; open_report; DIRTY=1 ;;
+                'ESC')           REPORT_EMAIL_INPUT=""; REPORT_EMAIL_MODE=0; DIRTY=1 ;;
+                $'\x7f'|$'\x08') REPORT_EMAIL_INPUT="${REPORT_EMAIL_INPUT%?}"; DIRTY=1 ;;
+                $'\x03')         break ;;
+                '')              ;;
+                *)               REPORT_EMAIL_INPUT+="$key"; DIRTY=1 ;;
+            esac
+            continue
+        fi
         case "$key" in
             'j'|'DOWN')     ((REPORT_SCROLL++)); DIRTY=1 ;;
             'k'|'UP')       ((REPORT_SCROLL > 0)) && ((REPORT_SCROLL--)); DIRTY=1 ;;
             'J')            ((REPORT_SCROLL+=5)); DIRTY=1 ;;
             'K')            ((REPORT_SCROLL > 4)) && ((REPORT_SCROLL-=5)) || REPORT_SCROLL=0; DIRTY=1 ;;
-            'q'|'ESC')      REPORT_MODE=0; DIRTY=1 ;;
+            'g')            REPORT_SCROLL=0; DIRTY=1 ;;
+            'G')            REPORT_SCROLL=99999; DIRTY=1 ;;
+            '/')
+                REPORT_EMAIL_MODE=1; REPORT_EMAIL_INPUT=""; DIRTY=1 ;;
+            't')
+                if [[ "$REPORT_SORT" == "name" ]]; then
+                    REPORT_SORT="date"
+                else
+                    REPORT_SORT="name"
+                fi
+                open_report; DIRTY=1 ;;
+            'q'|'ESC')      REPORT_MODE=0; REPORT_EMAIL_FILTER=""; DIRTY=1 ;;
             $'\x03')        break ;;
             '')             ;;
         esac
