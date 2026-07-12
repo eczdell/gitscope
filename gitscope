@@ -1087,8 +1087,15 @@ while true; do
                     REPORT_EMAIL_FILTER="$REPORT_EMAIL_INPUT"
                     REPORT_EMAIL_MODE=0; open_report; DIRTY=1 ;;
                 $'\x09')
-                    ((REPORT_AC_IDX++))
-                    ((REPORT_AC_IDX >= ${#REPORT_AC_LIST[@]})) && REPORT_AC_IDX=0
+                    if (( ${#REPORT_AC_LIST[@]} == 1 )); then
+                        REPORT_EMAIL_INPUT="${REPORT_AC_LIST[0]}"
+                        REPORT_EMAIL_FILTER="$REPORT_EMAIL_INPUT"
+                        REPORT_EMAIL_MODE=0; open_report; DIRTY=1
+                    elif (( ${#REPORT_AC_LIST[@]} > 1 )); then
+                        ((REPORT_AC_IDX++))
+                        ((REPORT_AC_IDX >= ${#REPORT_AC_LIST[@]})) && REPORT_AC_IDX=0
+                        REPORT_EMAIL_INPUT="${REPORT_AC_LIST[$REPORT_AC_IDX]}"
+                    fi
                     DIRTY=1 ;;
                 'ESC')           REPORT_EMAIL_INPUT=""; REPORT_EMAIL_MODE=0; DIRTY=1 ;;
                 $'\x7f'|$'\x08') REPORT_EMAIL_INPUT="${REPORT_EMAIL_INPUT%?}"
