@@ -319,7 +319,7 @@ draw_diff() {
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
     draw_hr out
-    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
+    out+="  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
 }
@@ -369,7 +369,7 @@ draw_files() {
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
     draw_hr out
-    out+="  ${DIM}j/k${RST}↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
+    out+="  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
 }
@@ -492,7 +492,7 @@ draw_report() {
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
 
     draw_hr out
-    out+="  ${DIM}j/k${RST}↕  ${DIM}g/G${RST}top/bot  ${DIM}/${RST}filter  ${DIM}t${RST}sort  ${DIM}b${RST}branch  ${DIM}q/Esc${RST} close${RST}${NL}"
+    out+="  ${DIM}j/k${RST} ↕  ${DIM}g/G${RST} top/bot  ${DIM}/${RST} filter  ${DIM}t${RST} sort  ${DIM}b${RST} branch  ${DIM}q/Esc${RST} close${RST}${NL}"
 
     printf '%b' "$out"
 }
@@ -934,9 +934,9 @@ draw() {
     fi
 
     if (( SIDEBAR_FOCUS )); then
-        out+="  ${DIM}j/k${RST}↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}${NL}"
+        out+="  ${DIM}j/k${RST} ↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}${NL}"
     else
-        out+="  ${DIM}j/k${RST}↕  ${DIM}d${RST}diff  ${DIM}f${RST}files  ${DIM}y${RST}copy  ${DIM}D${RST}date  ${DIM}R${RST}report  ${DIM}/${RST}filter  ${DIM}?${RST}help  ${DIM}q${RST}quit${RST}${NL}"
+        out+="  ${DIM}j/k${RST} ↕  ${DIM}d${RST} diff  ${DIM}f${RST} files  ${DIM}y${RST} copy  ${DIM}D${RST} date  ${DIM}R${RST} report  ${DIM}/${RST} filter  ${DIM}?${RST} help  ${DIM}q${RST} quit${RST}${NL}"
     fi
 
     printf '%b' "$out"
