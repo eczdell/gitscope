@@ -284,12 +284,9 @@ open_diff() {
 }
 
 draw_diff() {
-    local out=""
-    out+="$CLEAR"
-    build_status_bar
-    out+="$_SB"
-    build_hr
-    out+="$_HR"
+    printf '%b' "$CLEAR"
+    print_status_bar
+    print_hr
 
     local vis=$((TERM_H - 4))
     local total=${#DIFF_LINES[@]}
@@ -298,6 +295,7 @@ draw_diff() {
     (( DIFF_SCROLL > max_s )) && DIFF_SCROLL=$max_s
     (( DIFF_SCROLL < 0 )) && DIFF_SCROLL=0
 
+    local out=""
     local drawn=0
     local idx=$DIFF_SCROLL
     while (( drawn < vis && idx < total )); do
@@ -317,12 +315,10 @@ draw_diff() {
         ((idx++))
     done
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
-
-    build_hr
-    out+="$_HR"
-    out+="  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
-
     printf '%b' "$out"
+
+    print_hr
+    printf '%b' "  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -339,14 +335,9 @@ open_files() {
 }
 
 draw_files() {
-    local out=""
-    out+="$CLEAR"
-
-    build_status_bar
-    out+="$_SB"
-
-    build_hr
-    out+="$_HR"
+    printf '%b' "$CLEAR"
+    print_status_bar
+    print_hr
 
     local vis=$((TERM_H - 4))
     local total=${#FILES_LINES[@]}
@@ -355,6 +346,7 @@ draw_files() {
     (( FILES_SCROLL > max_s )) && FILES_SCROLL=$max_s
     (( FILES_SCROLL < 0 )) && FILES_SCROLL=0
 
+    local out=""
     local drawn=0
     local idx=$FILES_SCROLL
     while (( drawn < vis && idx < total )); do
@@ -370,12 +362,10 @@ draw_files() {
         ((idx++))
     done
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
-
-    build_hr
-    out+="$_HR"
-    out+="  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
-
     printf '%b' "$out"
+
+    print_hr
+    printf '%b' "  ${DIM}j/k${RST} ↕ scroll  ${DIM}q/Esc${RST} close${RST}${NL}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -443,17 +433,14 @@ open_report() {
 }
 
 draw_report() {
-    local out=""
-    out+="$CLEAR"
-
-    build_status_bar
-    out+="$_SB"
+    printf '%b' "$CLEAR"
+    print_status_bar
 
     if (( REPORT_EMAIL_MODE )); then
-        out+="  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_INPUT}${RST}${DIM}█ Esc to cancel  Tab to select${RST}${NL}"
+        printf '%b' "  ${BLD}${LGR}/${RST}${BLD}${REPORT_EMAIL_INPUT}${RST}${DIM}█ Esc to cancel  Tab to select${RST}${NL}"
         local ac_total=${#REPORT_AC_LIST[@]}
         if (( ac_total > 0 )); then
-            out+="  ${DIM}${ac_total} match(es)${RST}${NL}"
+            printf '%b' "  ${DIM}${ac_total} match(es)${RST}${NL}"
             local idx=0
             while (( idx < ac_total )); do
                 local sug="${REPORT_AC_LIST[$idx]}"
@@ -462,16 +449,15 @@ draw_report() {
                 local rest="${sug#*${REPORT_EMAIL_INPUT}}"
                 local marker="  "
                 (( idx == REPORT_AC_IDX )) && marker="${BLD}${LGR}▸${RST}"
-                out+="  ${marker} ${DIM}${prefix}${RST}${BLD}${LGR}${match}${RST}${DIM}${rest}${RST}${NL}"
+                printf '%b' "  ${marker} ${DIM}${prefix}${RST}${BLD}${LGR}${match}${RST}${DIM}${rest}${RST}${NL}"
                 ((idx++))
             done
         elif [[ -n "$REPORT_EMAIL_INPUT" ]]; then
-            out+="  ${DIM}  no matches${RST}${NL}"
+            printf '%b' "  ${DIM}  no matches${RST}${NL}"
         fi
     fi
 
-    build_hr
-    out+="$_HR"
+    print_hr
 
     local vis=$((TERM_H - 4))
     if (( REPORT_EMAIL_MODE )); then
@@ -488,6 +474,7 @@ draw_report() {
     (( REPORT_SCROLL > max_s )) && REPORT_SCROLL=$max_s
     (( REPORT_SCROLL < 0 )) && REPORT_SCROLL=0
 
+    local out=""
     local drawn=0
     local idx=$REPORT_SCROLL
     while (( drawn < vis && idx < total )); do
@@ -496,12 +483,10 @@ draw_report() {
         ((idx++))
     done
     while (( drawn < vis )); do out+="${NL}"; ((drawn++)); done
-
-    build_hr
-    out+="$_HR"
-    out+="  ${DIM}j/k${RST} ↕  ${DIM}g/G${RST} top/bot  ${DIM}/${RST} filter  ${DIM}t${RST} sort  ${DIM}b${RST} branch  ${DIM}q/Esc${RST} close${RST}${NL}"
-
     printf '%b' "$out"
+
+    print_hr
+    printf '%b' "  ${DIM}j/k${RST} ↕  ${DIM}g/G${RST} top/bot  ${DIM}/${RST} filter  ${DIM}t${RST} sort  ${DIM}b${RST} branch  ${DIM}q/Esc${RST} close${RST}${NL}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -768,53 +753,39 @@ build_sidebar() {
 # Draw
 # ═══════════════════════════════════════════════════════════════════════════
 
-_SB="" _HR=""
-build_status_bar() {
-    _SB=""
-    _SB+="${BLD}${CYN} ${RST} ${BLD}${CYN}${REPO_NAME}${RST}"
-    _SB+="${DIM} │ ${RST}${BLD}${GRN}${CUR_BR}${RST}"
+# Helpers: print status bar and separator directly to stdout
+print_status_bar() {
+    local s="${BLD}${CYN} ${RST} ${BLD}${CYN}${REPO_NAME}${RST}"
+    s+="${DIM} │ ${RST}${BLD}${GRN}${CUR_BR}${RST}"
 
     local mode_label="tree"
     (( DIFF_MODE ))  && mode_label="diff"
     (( FILES_MODE )) && mode_label="files"
     (( REPORT_MODE )) && mode_label="report"
 
-    _SB+="${DIM} │ ${RST}${BLD}${WHT}${TOTAL}${RST}${DIM} commits${RST}"
-    _SB+="${DIM} │ ${RST}${BLD}${LCY}${mode_label}${RST}"
+    s+="${DIM} │ ${RST}${BLD}${WHT}${TOTAL}${RST}${DIM} commits${RST}"
+    s+="${DIM} │ ${RST}${BLD}${LCY}${mode_label}${RST}"
 
     if [[ -n "$FILTER_TEXT" ]]; then
-        _SB+="${DIM} │ ${RST}${BLD}${LGR}/${RST}${FILTER_TEXT}"
+        s+="${DIM} │ ${RST}${BLD}${LGR}/${RST}${FILTER_TEXT}"
     fi
-
     if [[ -n "$DATE_FROM" || -n "$DATE_TO" ]]; then
-        _SB+="${DIM} │ ${RST}${BLD}${LCY}📅${RST} ${DATE_FROM:-..}→${DATE_TO:-..}"
+        s+="${DIM} │ ${RST}${BLD}${LCY}📅${RST} ${DATE_FROM:-..}→${DATE_TO:-..}"
     fi
-
     if [[ -n "$DESCENDANT_FILTER" ]]; then
-        _SB+="${DIM} │ ${RST}${BLD}${LYL}▼${RST} zoom:${DESCENDANT_FILTER:0:7}"
+        s+="${DIM} │ ${RST}${BLD}${LYL}▼${RST} zoom:${DESCENDANT_FILTER:0:7}"
     fi
+    if (( SHOW_ALL )); then s+="${DIM} │ ${RST}${LYL}${BLD}ALL${RST}"; fi
+    if (( SHOW_META )); then s+="${DIM} │ ${RST}${LYL}${BLD}META${RST}"; fi
+    if (( COMPACT )); then s+="${DIM} │ ${RST}${LYL}${BLD}CMP${RST}"; fi
 
-    if (( SHOW_ALL )); then
-        _SB+="${DIM} │ ${RST}${LYL}${BLD}ALL${RST}"
-    fi
-    if (( SHOW_META )); then
-        _SB+="${DIM} │ ${RST}${LYL}${BLD}META${RST}"
-    fi
-    if (( COMPACT )); then
-        _SB+="${DIM} │ ${RST}${LYL}${BLD}CMP${RST}"
-    fi
-
-    local used=${#_SB}
-    local fill=$((TERM_W - used))
-    (( fill > 0 )) && _SB+=$(printf '%*s' $fill '')
-
-    _SB+="${NL}"
+    printf '%b' "$s${NL}"
 }
 
-build_hr() {
+print_hr() {
     local hr=""
     for _ in $(seq 1 $TERM_W); do hr+="─"; done
-    _HR="${DIM}${hr}${RST}${NL}"
+    printf '%b' "${DIM}${hr}${RST}${NL}"
 }
 
 draw() {
@@ -830,17 +801,14 @@ draw() {
     TREE_W=$((TERM_W - SIDEBAR_W - 1))
     (( TREE_W < 20 )) && TREE_W=20
 
-    local out=""
-    out+="$CLEAR"
-    build_status_bar
-    out+="$_SB"
+    printf '%b' "$CLEAR"
+    print_status_bar
 
     if (( FILTER_MODE )); then
-        out+="  ${BLD}${LGR}/${RST}${BLD}${FILTER_INPUT}${RST}${DIM}█ Esc to cancel${RST}${NL}"
+        printf '%b' "  ${BLD}${LGR}/${RST}${BLD}${FILTER_INPUT}${RST}${DIM}█ Esc to cancel${RST}${NL}"
     fi
 
-    build_hr
-    out+="$_HR"
+    print_hr
 
     local vis=$((TERM_H - 4))
     (( FILTER_MODE )) && ((vis--))
@@ -857,10 +825,11 @@ draw() {
     (( SCROLL < 0 )) && SCROLL=0
 
     if (( HELP_ON )); then
-        draw_help "$out" "$vis"
+        draw_help "$vis"
         return
     fi
 
+    local out=""
     if (( SIDEBAR_W > 0 )); then
         build_sidebar "$vis"
         local drawn=0
@@ -894,35 +863,34 @@ draw() {
         done
         for ((; drawn<vis; drawn++)); do out+="${NL}"; done
     fi
+    printf '%b' "$out"
 
-    build_hr
-    out+="$_HR"
+    print_hr
 
     if [[ -n "$MSG" ]]; then
         local now=$(date +%s)
         if (( now - MSG_TIME < 2 )); then
-            out+="  ${BLD}${LGR}${MSG}${RST}${NL}"
+            printf '%b' "  ${BLD}${LGR}${MSG}${RST}${NL}"
         else
             MSG=""
         fi
     fi
 
     if (( SIDEBAR_FOCUS )); then
-        out+="  ${DIM}j/k${RST} ↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}${NL}"
+        printf '%b' "  ${DIM}j/k${RST} ↕ select  ${DIM}Enter${RST} confirm  ${DIM}0${RST} reset  ${DIM}Esc/b${RST} cancel${RST}${NL}"
     else
-        out+="  ${DIM}j/k${RST} ↕  ${DIM}d${RST} diff  ${DIM}f${RST} files  ${DIM}y${RST} copy  ${DIM}D${RST} date  ${DIM}R${RST} report  ${DIM}/${RST} filter  ${DIM}?${RST} help  ${DIM}q${RST} quit${RST}${NL}"
+        printf '%b' "  ${DIM}j/k${RST} ↕  ${DIM}d${RST} diff  ${DIM}f${RST} files  ${DIM}y${RST} copy  ${DIM}D${RST} date  ${DIM}R${RST} report  ${DIM}/${RST} filter  ${DIM}?${RST} help  ${DIM}q${RST} quit${RST}${NL}"
     fi
-
-    printf '%b' "$out"
 }
 
 draw_help() {
-    local out="$1" vis="$2"
+    local vis="$1"
     local hx=$(( (TERM_W - 54) / 2 ))
     (( hx < 2 )) && hx=2
     local hpfx=""
     for _ in $(seq 1 $hx); do hpfx+=" "; done
 
+    local out=""
     out+="$NL"
     out+="${hpfx}${BLD}${CYN}╔════════════════════════════════════════════════════╗${RST}$NL"
     out+="${hpfx}${BLD}${CYN}║${RST}  ${BLD}gitscope - Interactive Git Tree Viewer${RST}          ${BLD}${CYN}║${RST}$NL"
