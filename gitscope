@@ -507,7 +507,7 @@ draw_report() {
     local hr2=""
     for _ in $(seq 1 $TERM_W); do hr2+="─"; done
     out+="${DIM}${hr2}${RST}$NL"
-    out+="  ${DIM}j/k${RST}↕  ${DIM}g/G${RST}top/bot  ${DIM}/${RST}filter  ${DIM}t${RST}sort  ${DIM}q/Esc${RST} close${RST}$NL"
+    out+="  ${DIM}j/k${RST}↕  ${DIM}g/G${RST}top/bot  ${DIM}/${RST}filter  ${DIM}t${RST}sort  ${DIM}b${RST}branch  ${DIM}q/Esc${RST} close${RST}$NL"
 
     printf '%b' "$out"
 }
@@ -1134,6 +1134,9 @@ while true; do
                     REPORT_SORT="name"
                 fi
                 open_report; DIRTY=1 ;;
+            'b')
+                REPORT_MODE=0; REPORT_EMAIL_FILTER=""
+                SIDEBAR_FOCUS=1; BRANCH_IDX=0; DIRTY=1 ;;
             'q'|'ESC')      REPORT_MODE=0; REPORT_EMAIL_FILTER=""; DIRTY=1 ;;
             $'\x03')        break ;;
             '')             ;;
