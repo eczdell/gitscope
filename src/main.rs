@@ -306,6 +306,9 @@ fn main() -> io::Result<()> {
         issues_state: "open".to_string(),
         issues_filter_input: String::new(),
         issues_filter_text: String::new(),
+        issues_date_filter: String::new(),
+        issues_label_filter: String::new(),
+        issues_label_filter_input: String::new(),
         issues_cursor: 0,
 
         issue_create_title: String::new(),

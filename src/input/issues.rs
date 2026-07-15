@@ -101,6 +101,47 @@ pub(crate) fn handle_issues_key(app: &mut AppState, key: KeyEvent) {
         }
         KeyCode::Char('q') | KeyCode::Esc => {
             app.mode = AppMode::Tree;
+            app.confirm_delete_issue = false;
+            app.dirty = true;
+        }
+        KeyCode::Char('l') => {
+            app.issues_label_filter_input.clear();
+            app.mode = AppMode::IssuesLabelFilter;
+            app.dirty = true;
+        }
+        KeyCode::Char('t') => {
+            app.issues_date_filter = match app.issues_date_filter.as_str() {
+                "" => "today".to_string(),
+                "today" => "week".to_string(),
+                "week" => "month".to_string(),
+                "month" => "year".to_string(),
+                _ => String::new(),
+            };
+            let msg = if app.issues_date_filter.is_empty() {
+                "Date filter: off".to_string()
+            } else {
+                format!("Date filter: {}", app.issues_date_filter)
+            };
+            app.msg = msg;
+            app.msg_time = Some(Instant::now());
+            app.issues_cursor = 0;
+            app.issues_scroll = 0;
+            app.confirm_delete_issue = false;
+            crate::github::open_issues_view(app);
+            app.dirty = true;
+        }
+        KeyCode::Char('g') => {
+            app.issues_cursor = 0;
+            app.issues_scroll = 0;
+            app.confirm_delete_issue = false;
+            app.dirty = true;
+        }
+        KeyCode::Char('G') => {
+            app.issues_cursor = app.issues_lines.len().saturating_sub(1);
+            app.issues_scroll = app.issues_cursor.saturating_sub(
+                ((app.term_h as usize).max(1).saturating_sub(6)).saturating_sub(1),
+            );
+            app.confirm_delete_issue = false;
             app.dirty = true;
         }
         _ => {
@@ -137,6 +178,39 @@ pub(crate) fn handle_issues_filter_key(app: &mut AppState, key: KeyEvent) {
         KeyCode::Char(c) => {
             app.issues_filter_input.push(c);
             app.issues_filter_text = app.issues_filter_input.clone();
+            crate::github::apply_issues_filter(app);
+            app.dirty = true;
+        }
+        _ => {}
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issues Label Filter
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub(crate) fn handle_issues_label_filter_key(app: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            app.issues_label_filter = app.issues_label_filter_input.clone();
+            app.mode = AppMode::Issues;
+            crate::github::apply_issues_filter(app);
+            app.dirty = true;
+        }
+        KeyCode::Esc => {
+            app.issues_label_filter_input.clear();
+            app.issues_label_filter.clear();
+            app.mode = AppMode::Issues;
+            crate::github::apply_issues_filter(app);
+            app.dirty = true;
+        }
+        KeyCode::Backspace => {
+            app.issues_label_filter_input.pop();
+            crate::github::apply_issues_filter(app);
+            app.dirty = true;
+        }
+        KeyCode::Char(c) => {
+            app.issues_label_filter_input.push(c);
             crate::github::apply_issues_filter(app);
             app.dirty = true;
         }
@@ -190,6 +264,33 @@ pub(crate) fn handle_issue_detail_key(app: &mut AppState, key: KeyEvent) {
         }
         KeyCode::Char('q') | KeyCode::Esc => {
             app.mode = AppMode::Issues;
+            app.dirty = true;
+        }
+        KeyCode::Char('o') => {
+            // Scan issue_detail_lines for image URLs and open with feh
+            let urls: Vec<String> = app.issue_detail_lines
+                .iter()
+                .flat_map(|line| extract_image_urls(line))
+                .collect();
+            if urls.is_empty() {
+                app.msg = "No image URLs found in this issue".to_string();
+                app.msg_time = Some(Instant::now());
+            } else {
+                let count = urls.len();
+                for url in &urls {
+                    let url = url.clone();
+                    std::thread::spawn(move || {
+                        std::process::Command::new("feh")
+                            .arg(&url)
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .spawn()
+                            .ok();
+                    });
+                }
+                app.msg = format!("Opening {} image(s) with feh", count);
+                app.msg_time = Some(Instant::now());
+            }
             app.dirty = true;
         }
         _ => {}
@@ -344,5 +445,44 @@ fn update_label_ac(app: &mut AppState) {
 
     app.label_ac_list = matches;
     app.label_ac_idx = 0;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Image URL Extraction
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Extract image URLs from a line of text.
+/// Matches URLs ending with common image extensions or GitHub user attachment URLs.
+fn extract_image_urls(line: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut remaining = line;
+    let image_extensions = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"];
+
+    while let Some(start) = remaining.find("http") {
+        let candidate = &remaining[start..];
+        // Find end of URL (whitespace, closing bracket, etc.)
+        let end = candidate.find(|c: char| c.is_whitespace() || c == ')' || c == '>' || c == '"' || c == '<')
+            .unwrap_or(candidate.len());
+        let url = &candidate[..end];
+
+        // Check if URL looks like an image
+        let lower_url = url.to_lowercase();
+        let is_image = image_extensions.iter().any(|ext| {
+            lower_url.ends_with(&format!(".{}", ext)) || lower_url.contains(&format!(".{}?", ext))
+        });
+        let is_github_asset = lower_url.contains("github.com/user-attachments/assets/")
+            || lower_url.contains("githubusercontent.com");
+
+        if is_image || is_github_asset {
+            // Strip any trailing punctuation
+            let clean_url = url.trim_end_matches(&['.', ',', ';', ':', '!', '?'][..]);
+            urls.push(clean_url.to_string());
+        }
+
+        remaining = &remaining[start + end..];
+    }
+
+    urls
 }
 

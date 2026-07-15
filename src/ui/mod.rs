@@ -274,8 +274,8 @@ fn render_command_bar(app: &AppState) -> Paragraph<'static> {
             ansi::DIM, ansi::RST, ansi::DIM, ansi::RST, ansi::DIM, ansi::RST, ansi::DIM, ansi::RST, ansi::RST
         ),
         AppMode::IssueDetail => format!(
-            "  {}j/k{} ↕ scroll  {}J/K{} page  {}Esc/q{} back{}",
-            ansi::DIM, ansi::RST, ansi::DIM, ansi::RST, ansi::DIM, ansi::RST, ansi::RST
+            "  {}j/k{} ↕ scroll  {}J/K{} page  {}o{} open image  {}Esc/q{} back{}",
+            ansi::DIM, ansi::RST, ansi::DIM, ansi::RST, ansi::DIM, ansi::RST, ansi::DIM, ansi::RST, ansi::RST
         ),
         AppMode::Issues => format!(
             "  {}j/k{} ↕  {}Enter{} open  {}x{} close  {}e{} edit  {}c{} create  {}s{} state  {}q{} quit{}",
@@ -313,6 +313,11 @@ fn render_filter_input(app: &AppState) -> Option<Line<'static>> {
         Some(ansi_to_line(&format!(
             "  {}{}{}{}{}█ Esc to cancel  Enter to apply{}",
             ansi::BLD, ansi::LGR, app.issues_filter_input, ansi::RST, ansi::DIM, ansi::RST
+        )))
+    } else if app.mode == AppMode::IssuesLabelFilter {
+        Some(ansi_to_line(&format!(
+            "  {}{}{}{}{}█ Esc to cancel  Enter to apply  (label filter){}",
+            ansi::BLD, ansi::LGR, app.issues_label_filter_input, ansi::RST, ansi::DIM, ansi::RST
         )))
     } else {
         None
@@ -390,8 +395,11 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
     // Calculate vertical layout: status bar, filter area (optional), content, message (optional), command bar
     let mut constraints = vec![Constraint::Length(1)]; // status bar
 
-    // Filter input line (TreeFilter or IssuesFilter mode)
-    if app.mode == AppMode::TreeFilter || app.mode == AppMode::IssuesFilter {
+    // Filter input line (TreeFilter or IssuesFilter or IssuesLabelFilter mode)
+    if app.mode == AppMode::TreeFilter
+        || app.mode == AppMode::IssuesFilter
+        || app.mode == AppMode::IssuesLabelFilter
+    {
         constraints.push(Constraint::Length(1));
     }
 
@@ -431,7 +439,10 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
     chunk_idx += 1;
 
     // Filter input
-    if app.mode == AppMode::TreeFilter || app.mode == AppMode::IssuesFilter {
+    if app.mode == AppMode::TreeFilter
+        || app.mode == AppMode::IssuesFilter
+        || app.mode == AppMode::IssuesLabelFilter
+    {
         if let Some(line) = render_filter_input(app) {
             let paragraph = Paragraph::new(Text::from(vec![line]))
                 .style(Style::default().bg(Color::Black));
@@ -472,7 +483,7 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
         }
         AppMode::Diff => render_diff_view(frame, chunks[chunk_idx], app),
         AppMode::Files => render_files_view(frame, chunks[chunk_idx], app),
-        AppMode::Issues | AppMode::IssuesFilter => {
+        AppMode::Issues | AppMode::IssuesFilter | AppMode::IssuesLabelFilter => {
             render_issues_view(frame, chunks[chunk_idx], app)
         }
         AppMode::IssueCreate => render_issue_create_view(frame, chunks[chunk_idx], app),

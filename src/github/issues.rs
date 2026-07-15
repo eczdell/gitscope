@@ -7,6 +7,24 @@ use crate::app::AppState;
 use super::{build_octocrab, build_octocrab_unauthed, detect_owner_repo, get_token};
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Date Filter Helper
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Compute the `since` date-time string based on the filter label.
+/// Returns None if no filter is active.
+fn compute_since_date(filter: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let now = chrono::Utc::now();
+    let since = match filter {
+        "today" => now.date_naive().and_hms_opt(0, 0, 0).unwrap(),
+        "week" => (now - chrono::Duration::days(7)).date_naive().and_hms_opt(0, 0, 0).unwrap(),
+        "month" => (now - chrono::Duration::days(30)).date_naive().and_hms_opt(0, 0, 0).unwrap(),
+        "year" => (now - chrono::Duration::days(365)).date_naive().and_hms_opt(0, 0, 0).unwrap(),
+        _ => return None,
+    };
+    Some(chrono::DateTime::from_naive_utc_and_offset(since, chrono::Utc))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // List Issues (CLI)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -203,6 +221,7 @@ pub fn open_issues_view(app: &mut AppState) {
     if get_token().is_none() {
         // Try without token for public repos
         let state = app.issues_state.clone();
+        let date_filter = app.issues_date_filter.clone();
 
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         let result = rt.block_on(async {
@@ -222,6 +241,10 @@ pub fn open_issues_view(app: &mut AppState) {
 
             if let Some(s) = state_filter {
                 req = req.state(s);
+            }
+
+            if let Some(since) = compute_since_date(&date_filter) {
+                req = req.since(since);
             }
 
             let page = req
@@ -257,6 +280,7 @@ pub fn open_issues_view(app: &mut AppState) {
     }
 
     let state = app.issues_state.clone();
+    let date_filter = app.issues_date_filter.clone();
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     let result = rt.block_on(async {
@@ -276,6 +300,10 @@ pub fn open_issues_view(app: &mut AppState) {
 
         if let Some(s) = state_filter {
             req = req.state(s);
+        }
+
+        if let Some(since) = compute_since_date(&date_filter) {
+            req = req.since(since);
         }
 
         let page = req
@@ -412,14 +440,12 @@ fn format_issues_lines(
 // Issues Filtering
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Filter the issues lines by the given filter text (case-insensitive match).
+/// Filter the issues lines by the given filter text (case-insensitive match)
+/// and by label filter.
 /// The first two lines (header and separator) are always kept.
 pub fn apply_issues_filter(app: &mut AppState) {
     let filter = app.issues_filter_text.to_lowercase();
-    if filter.is_empty() {
-        app.issues_lines = app.issues_lines_full.clone();
-        return;
-    }
+    let label_filter = app.issues_label_filter.to_lowercase();
 
     let mut filtered: Vec<String> = Vec::new();
     // Always keep the header lines (first 2 lines)
@@ -428,9 +454,22 @@ pub fn apply_issues_filter(app: &mut AppState) {
             filtered.push(line.clone());
             continue;
         }
-        if line.to_lowercase().contains(&filter) {
-            filtered.push(line.clone());
+
+        // Text filter
+        if !filter.is_empty() && !line.to_lowercase().contains(&filter) {
+            continue;
         }
+
+        // Label filter: check if the line contains the label (lines with "↳ Labels: [label_name]")
+        if !label_filter.is_empty() {
+            let line_lower = line.to_lowercase();
+            let label_match = line_lower.contains(&format!("[{}]", label_filter));
+            if !label_match {
+                continue;
+            }
+        }
+
+        filtered.push(line.clone());
     }
 
     // Clamp cursor and scroll to new filtered list

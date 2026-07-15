@@ -29,6 +29,7 @@ pub enum AppMode {
     Files,
     Issues,
     IssuesFilter,
+    IssuesLabelFilter,
     IssueCreate,
     IssueDetail,
     IssueEdit,
@@ -120,6 +121,9 @@ pub struct AppState {
     pub issues_state: String,
     pub issues_filter_input: String,
     pub issues_filter_text: String,
+    pub issues_date_filter: String,  // "", "today", "week", "month", "year"
+    pub issues_label_filter: String,
+    pub issues_label_filter_input: String,
 
     pub issue_create_title: String,
     pub issue_create_body: String,
