@@ -594,10 +594,10 @@ fn render_issues_view(frame: &mut Frame, area: Rect, app: &AppState) {
 fn render_issue_create_view(frame: &mut Frame, area: Rect, app: &AppState) {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // Title
+    // Header
     lines.push(ansi_to_line(&format!(
-        "  {}Create a new issue{}",
-        ansi::BLD, ansi::RST
+        "  {}Create a new issue   {}({}){}",
+        ansi::BLD, ansi::DIM, app.repo_name, ansi::RST
     )));
     lines.push(ansi_to_line(&format!(
         "  {}─────────────────────{}",
@@ -610,36 +610,34 @@ fn render_issue_create_view(frame: &mut Frame, area: Rect, app: &AppState) {
         "  {}Title:{} {}{}",
         ansi::BLD, ansi::RST,
         app.issue_create_title,
-        if app.issue_create_body.is_empty() { "█" } else { "" }
+        if app.issue_create_focus_title { "█" } else { "" }
     )));
 
     // Body input
     lines.push(Line::raw(""));
-    lines.push(ansi_to_line(&format!(
-        "  {}Body:{} (optional){} {}",
-        ansi::BLD, ansi::DIM, ansi::RST,
-        if !app.issue_create_body.is_empty() { " █" } else { "" }
-    )));
-    if app.issue_create_body.is_empty() {
+    let body_label = if app.issue_create_focus_title {
+        format!("  {}Body:{} (optional){}", ansi::BLD, ansi::DIM, ansi::RST)
+    } else {
+        format!("  {}Body:{} {}", ansi::BLD, ansi::RST, "█")
+    };
+    lines.push(ansi_to_line(&body_label));
+    if !app.issue_create_body.is_empty() {
+        for body_line in app.issue_create_body.lines().take(5) {
+            lines.push(ansi_to_line(&format!("  {}", body_line)));
+        }
+    } else if !app.issue_create_focus_title {
         lines.push(ansi_to_line(&format!(
             "  {}  {}",
             ansi::DIM, ansi::RST
         )));
-    } else {
-        // Show first few lines of body
-        for body_line in app.issue_create_body.lines().take(5) {
-            lines.push(ansi_to_line(&format!("  {}", body_line)));
-        }
     }
 
     lines.push(Line::raw(""));
     lines.push(ansi_to_line(&format!(
-        "  {}{}Enter{} = submit    {}Esc{} = cancel{}{}  {}Note:{} uses `gh auth token` for authentication{}{}{}",
-        ansi::BLD, ansi::LGR, ansi::RST,
-        ansi::BLD, ansi::LRE, ansi::RST,
-        ansi::DIM, ansi::RST,
+        "  {}Tab{} = switch field  {}{}Enter{} = submit  {}Esc{} = cancel{}",
         ansi::BLD, ansi::RST,
-        ansi::DIM, ansi::RST
+        ansi::BLD, ansi::LGR, ansi::RST,
+        ansi::BLD, ansi::LRE, ansi::RST
     )));
 
     let vis = (area.height as usize).max(1);
@@ -893,6 +891,11 @@ fn render_filter_input(app: &AppState) -> Option<Line<'static>> {
             "  {}{}{}{}{}█ Esc to cancel{}",
             ansi::BLD, ansi::LGR, app.filter_input, ansi::RST, ansi::DIM, ansi::RST
         )))
+    } else if app.mode == crate::app::AppMode::IssuesFilter {
+        Some(ansi_to_line(&format!(
+            "  {}{}{}{}{}█ Esc to cancel  Enter to apply{}",
+            ansi::BLD, ansi::LGR, app.issues_filter_input, ansi::RST, ansi::DIM, ansi::RST
+        )))
     } else {
         None
     }
@@ -1041,8 +1044,8 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
     // Calculate vertical layout: status bar, filter area (optional), content, message (optional), command bar
     let mut constraints = vec![Constraint::Length(1)]; // status bar
 
-    // Filter input line (TreeFilter mode)
-    if app.mode == crate::app::AppMode::TreeFilter {
+    // Filter input line (TreeFilter or IssuesFilter mode)
+    if app.mode == crate::app::AppMode::TreeFilter || app.mode == crate::app::AppMode::IssuesFilter {
         constraints.push(Constraint::Length(1));
     }
 
@@ -1082,7 +1085,7 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
     chunk_idx += 1;
 
     // Filter input
-    if app.mode == crate::app::AppMode::TreeFilter {
+    if app.mode == crate::app::AppMode::TreeFilter || app.mode == crate::app::AppMode::IssuesFilter {
         if let Some(line) = render_filter_input(app) {
             let paragraph = Paragraph::new(Text::from(vec![line]))
                 .style(Style::default().bg(Color::Black));
@@ -1123,7 +1126,9 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
         }
         crate::app::AppMode::Diff => render_diff_view(frame, chunks[chunk_idx], app),
         crate::app::AppMode::Files => render_files_view(frame, chunks[chunk_idx], app),
-        crate::app::AppMode::Issues => render_issues_view(frame, chunks[chunk_idx], app),
+        crate::app::AppMode::Issues | crate::app::AppMode::IssuesFilter => {
+            render_issues_view(frame, chunks[chunk_idx], app)
+        }
         crate::app::AppMode::IssueCreate => render_issue_create_view(frame, chunks[chunk_idx], app),
         crate::app::AppMode::IssueEdit => render_issue_edit_view(frame, chunks[chunk_idx], app),
         crate::app::AppMode::IssueDetail => {

@@ -301,11 +301,15 @@ fn main() -> io::Result<()> {
 
         issues_scroll: 0,
         issues_lines: Vec::new(),
+        issues_lines_full: Vec::new(),
         issues_state: "open".to_string(),
+        issues_filter_input: String::new(),
+        issues_filter_text: String::new(),
         issues_cursor: 0,
 
         issue_create_title: String::new(),
         issue_create_body: String::new(),
+        issue_create_focus_title: true,
 
         // Issue edit view
         issue_edit_title: String::new(),

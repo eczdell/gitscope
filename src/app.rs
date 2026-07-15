@@ -28,6 +28,7 @@ pub enum AppMode {
     Diff,
     Files,
     Issues,
+    IssuesFilter,
     IssueCreate,
     IssueDetail,
     IssueEdit,
@@ -110,10 +111,14 @@ pub struct AppState {
     // Issues view
     pub issues_scroll: usize,
     pub issues_lines: Vec<String>,
+    pub issues_lines_full: Vec<String>,
     pub issues_state: String,
+    pub issues_filter_input: String,
+    pub issues_filter_text: String,
 
     pub issue_create_title: String,
     pub issue_create_body: String,
+    pub issue_create_focus_title: bool,
 
     // Issue edit view
     pub issue_edit_title: String,

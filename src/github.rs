@@ -182,13 +182,38 @@ pub async fn list_issues(
 
         // Author and date
         let user = issue.user.login.as_str();
-        let created = issue
+        let _created = issue
             .created_at
             .format("%Y-%m-%d")
             .to_string();
 
+        // Assignee
+        let assignee_str = issue
+            .assignees
+            .first()
+            .map(|a| format!("{}@{}", ansi::LMA, a.login))
+            .unwrap_or_else(|| format!("{}-{}", ansi::DIM, ansi::RST));
+
+        // Labels (compact, first 3 max)
+        let label_str: String = {
+            let labels: Vec<String> = issue
+                .labels
+                .iter()
+                .take(3)
+                .map(|l| {
+                    let name = &l.name;
+                    format!("{}{}[{}]{}", ansi::BLD, ansi::LBL, name, ansi::RST)
+                })
+                .collect();
+            if issue.labels.len() > 3 {
+                format!("{} {}…{}", labels.join(" "), ansi::DIM, ansi::RST)
+            } else {
+                labels.join(" ")
+            }
+        };
+
         println!(
-            "  {}#{}  {} {}{}{} {}by {}{}  {}  {}",
+            "  {}#{}  {} {}{}{}  {}  {}by {}{}  {}",
             ansi::LYL,
             num,
             state_label,
@@ -196,11 +221,18 @@ pub async fn list_issues(
             ansi::WHT,
             title,
             ansi::RST,
+            assignee_str,
             ansi::GRY,
             user,
-            ansi::RST,
-            created
+            ansi::RST
         );
+
+        if !issue.labels.is_empty() {
+            println!(
+                "  {}↳ Labels:{} {}",
+                ansi::DIM, ansi::RST, label_str
+            );
+        }
     }
 
     // Pagination info
@@ -410,22 +442,92 @@ pub fn open_issues_view(app: &mut AppState) {
         let num = issue.number;
         let title = &issue.title;
         let user = issue.user.login.as_str();
-        let created = issue
+        let _created = issue
             .created_at
             .format("%Y-%m-%d")
             .to_string();
 
+        // Assignee
+        let assignee_str = issue
+            .assignees
+            .first()
+            .map(|a| format!("{}@{}", ansi::LMA, a.login))
+            .unwrap_or_else(|| format!("{}-{}", ansi::DIM, ansi::RST));
+
+        // Labels (compact, first 2 max)
+        let label_str: String = {
+            let labels: Vec<String> = issue
+                .labels
+                .iter()
+                .take(2)
+                .map(|l| {
+                    let name = &l.name;
+                    format!("{}{}[{}]{}", ansi::BLD, ansi::LBL, name, ansi::RST)
+                })
+                .collect();
+            if issue.labels.len() > 2 {
+                format!("{} {}…{}", labels.join(" "), ansi::DIM, ansi::RST)
+            } else {
+                labels.join(" ")
+            }
+        };
+
         lines.push(format!(
-            "  {}#{}  {} {}{}{} {}by {}{}  {}  {}",
+            "  {}#{}  {} {}{}{}  {}  {}by {}{}  {}",
             ansi::LYL, num, state_label,
             ansi::BLD, ansi::WHT, title, ansi::RST,
-            ansi::GRY, user, ansi::RST, created
+            assignee_str,
+            ansi::GRY, user, ansi::RST
         ));
+
+        // If there are labels, add a second line for them
+        if !issue.labels.is_empty() {
+            lines.push(format!(
+                "  {}↳ Labels:{} {}",
+                ansi::DIM, ansi::RST, label_str
+            ));
+        }
     }
 
     app.issues_lines = lines;
+    app.issues_lines_full = app.issues_lines.clone();
     app.issues_scroll = 0;
     app.mode = crate::app::AppMode::Issues;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issues Filtering
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Filter the issues lines by the given filter text (case-insensitive match).
+/// The first two lines (header and separator) are always kept.
+pub fn apply_issues_filter(app: &mut AppState) {
+    let filter = app.issues_filter_text.to_lowercase();
+    if filter.is_empty() {
+        app.issues_lines = app.issues_lines_full.clone();
+        return;
+    }
+
+    let mut filtered: Vec<String> = Vec::new();
+    // Always keep the header lines (first 2 lines)
+    for (i, line) in app.issues_lines_full.iter().enumerate() {
+        if i < 2 {
+            filtered.push(line.clone());
+            continue;
+        }
+        if line.to_lowercase().contains(&filter) {
+            filtered.push(line.clone());
+        }
+    }
+
+    // Clamp cursor and scroll to new filtered list
+    app.issues_lines = filtered;
+    if app.issues_cursor >= app.issues_lines.len() {
+        app.issues_cursor = app.issues_lines.len().saturating_sub(1);
+    }
+    if app.issues_scroll >= app.issues_lines.len() {
+        app.issues_scroll = app.issues_lines.len().saturating_sub(1);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -536,7 +638,7 @@ fn format_issue_detail(app: &mut AppState, issue: &octocrab::models::issues::Iss
         ansi::BLD, ansi::CYN, issue.number, state_label, issue.title
     ));
 
-    // Metadata line
+    // Author and dates
     let user = issue.user.login.as_str();
     let created = issue
         .created_at
@@ -551,6 +653,45 @@ fn format_issue_detail(app: &mut AppState, issue: &octocrab::models::issues::Iss
         "  {}by {}{}  created: {}  updated: {}",
         ansi::GRY, user, ansi::RST, created, updated
     ));
+
+    // Assignees
+    if !issue.assignees.is_empty() {
+        let assignee_list: Vec<String> = issue.assignees
+            .iter()
+            .map(|a| format!("{}@{}", ansi::LMA, a.login))
+            .collect();
+        lines.push(format!(
+            "  {}Assigned:{} {}",
+            ansi::BLD, ansi::RST, assignee_list.join(" ")
+        ));
+    }
+
+    // Milestone
+    if let Some(ref milestone) = issue.milestone {
+        lines.push(format!(
+            "  {}Milestone:{} {}{}{}",
+            ansi::BLD, ansi::RST,
+            ansi::LCY, milestone.title, ansi::RST
+        ));
+    }
+
+    // Comments
+    if issue.comments > 0 {
+        lines.push(format!(
+            "  {}Comments:{} {}{}{}",
+            ansi::BLD, ansi::RST,
+            ansi::LYL, issue.comments, ansi::RST
+        ));
+    }
+
+    // PR indicator
+    if issue.pull_request.is_some() {
+        lines.push(format!(
+            "  {}Type:{} {}Pull Request{}",
+            ansi::BLD, ansi::RST,
+            ansi::LMA, ansi::RST
+        ));
+    }
 
     // Labels
     if !issue.labels.is_empty() {
@@ -611,6 +752,7 @@ fn format_issue_detail(app: &mut AppState, issue: &octocrab::models::issues::Iss
 pub fn start_create_issue(app: &mut AppState) {
     app.issue_create_title.clear();
     app.issue_create_body.clear();
+    app.issue_create_focus_title = true;
     app.mode = crate::app::AppMode::IssueCreate;
 }
 
@@ -990,20 +1132,55 @@ fn format_issues_lines(
         let num = issue.number;
         let title = &issue.title;
         let user = issue.user.login.as_str();
-        let created = issue
+        let _created = issue
             .created_at
             .format("%Y-%m-%d")
             .to_string();
 
+        // Assignee
+        let assignee_str = issue
+            .assignees
+            .first()
+            .map(|a| format!("{}@{}", ansi::LMA, a.login))
+            .unwrap_or_else(|| format!("{}-{}", ansi::DIM, ansi::RST));
+
+        // Labels (compact, first 2 max)
+        let label_str: String = {
+            let labels: Vec<String> = issue
+                .labels
+                .iter()
+                .take(2)
+                .map(|l| {
+                    let name = &l.name;
+                    format!("{}{}[{}]{}", ansi::BLD, ansi::LBL, name, ansi::RST)
+                })
+                .collect();
+            if issue.labels.len() > 2 {
+                format!("{} {}…{}", labels.join(" "), ansi::DIM, ansi::RST)
+            } else {
+                labels.join(" ")
+            }
+        };
+
         lines.push(format!(
-            "  {}#{}  {} {}{}{} {}by {}{}  {}  {}",
+            "  {}#{}  {} {}{}{}  {}  {}by {}{}  {}",
             ansi::LYL, num, state_label,
             ansi::BLD, ansi::WHT, title, ansi::RST,
-            ansi::GRY, user, ansi::RST, created
+            assignee_str,
+            ansi::GRY, user, ansi::RST
         ));
+
+        // If there are labels, add a second line for them
+        if !issue.labels.is_empty() {
+            lines.push(format!(
+                "  {}↳ Labels:{} {}",
+                ansi::DIM, ansi::RST, label_str
+            ));
+        }
     }
 
     app.issues_lines = lines;
+    app.issues_lines_full = app.issues_lines.clone();
     app.issues_scroll = 0;
     app.mode = crate::app::AppMode::Issues;
 }

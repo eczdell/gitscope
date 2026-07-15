@@ -59,6 +59,36 @@ pub fn handle_key(app: &mut AppState, key: event::KeyEvent) -> bool {
             _ => {}
         },
 
+        // ─── Issues Filter Mode ───
+        AppMode::IssuesFilter => match key.code {
+            KeyCode::Enter => {
+                app.issues_filter_text = app.issues_filter_input.clone();
+                app.mode = AppMode::Issues;
+                crate::github::apply_issues_filter(app);
+                app.dirty = true;
+            }
+            KeyCode::Esc => {
+                app.issues_filter_input.clear();
+                app.issues_filter_text.clear();
+                app.mode = AppMode::Issues;
+                crate::github::apply_issues_filter(app);
+                app.dirty = true;
+            }
+            KeyCode::Backspace => {
+                app.issues_filter_input.pop();
+                app.issues_filter_text = app.issues_filter_input.clone();
+                crate::github::apply_issues_filter(app);
+                app.dirty = true;
+            }
+            KeyCode::Char(c) => {
+                app.issues_filter_input.push(c);
+                app.issues_filter_text = app.issues_filter_input.clone();
+                crate::github::apply_issues_filter(app);
+                app.dirty = true;
+            }
+            _ => {}
+        },
+
         // ─── Diff Mode ───
         AppMode::Diff => match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
@@ -256,6 +286,11 @@ pub fn handle_key(app: &mut AppState, key: event::KeyEvent) -> bool {
 
         // ─── Issues Mode ───
         AppMode::Issues => match key.code {
+            KeyCode::Char('/') => {
+                app.issues_filter_input.clear();
+                app.mode = AppMode::IssuesFilter;
+                app.dirty = true;
+            }
             KeyCode::Char('j') | KeyCode::Down => {
                 app.issues_cursor += 1;
                 let max = app.issues_lines.len().saturating_sub(1);
@@ -407,10 +442,7 @@ pub fn handle_key(app: &mut AppState, key: event::KeyEvent) -> bool {
                 app.dirty = true;
             }
             KeyCode::Tab => {
-                // Toggle between title and body
-                if app.issue_create_title.is_empty() && app.issue_create_body.is_empty() {
-                    // First Tab: skip to body if title is done
-                }
+                app.issue_create_focus_title = !app.issue_create_focus_title;
                 app.dirty = true;
             }
             KeyCode::Esc => {
@@ -418,20 +450,16 @@ pub fn handle_key(app: &mut AppState, key: event::KeyEvent) -> bool {
                 app.dirty = true;
             }
             KeyCode::Backspace => {
-                if !app.issue_create_body.is_empty() {
-                    app.issue_create_body.pop();
-                } else if !app.issue_create_title.is_empty() {
+                if app.issue_create_focus_title {
                     app.issue_create_title.pop();
+                } else {
+                    app.issue_create_body.pop();
                 }
                 app.dirty = true;
             }
             KeyCode::Char(c) => {
-                if app.issue_create_body.is_empty() && !app.issue_create_title.contains('\n') {
-                    if c == '\n' {
-                        // do nothing, Enter handled above
-                    } else {
-                        app.issue_create_title.push(c);
-                    }
+                if app.issue_create_focus_title {
+                    app.issue_create_title.push(c);
                 } else {
                     app.issue_create_body.push(c);
                 }
