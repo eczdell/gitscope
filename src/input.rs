@@ -443,7 +443,14 @@ pub fn handle_key(app: &mut AppState, key: event::KeyEvent) -> bool {
                 app.dirty = true;
             }
             KeyCode::Tab => {
-                app.issue_create_focus_title = !app.issue_create_focus_title;
+                if app.issue_create_focus == 2 && !app.label_ac_list.is_empty() {
+                    app.label_ac_idx = (app.label_ac_idx + 1) % app.label_ac_list.len();
+                    let selected = &app.label_ac_list[app.label_ac_idx];
+                    app.issue_create_labels_input =
+                        replace_label_current_token(&app.issue_create_labels_input, selected);
+                } else {
+                    app.issue_create_focus = (app.issue_create_focus + 1) % 3;
+                }
                 app.dirty = true;
             }
             KeyCode::Esc => {
@@ -451,18 +458,26 @@ pub fn handle_key(app: &mut AppState, key: event::KeyEvent) -> bool {
                 app.dirty = true;
             }
             KeyCode::Backspace => {
-                if app.issue_create_focus_title {
-                    app.issue_create_title.pop();
-                } else {
-                    app.issue_create_body.pop();
+                match app.issue_create_focus {
+                    0 => { app.issue_create_title.pop(); }
+                    1 => { app.issue_create_body.pop(); }
+                    2 => {
+                        app.issue_create_labels_input.pop();
+                        update_label_ac(app);
+                    }
+                    _ => {}
                 }
                 app.dirty = true;
             }
             KeyCode::Char(c) => {
-                if app.issue_create_focus_title {
-                    app.issue_create_title.push(c);
-                } else {
-                    app.issue_create_body.push(c);
+                match app.issue_create_focus {
+                    0 => { app.issue_create_title.push(c); }
+                    1 => { app.issue_create_body.push(c); }
+                    2 => {
+                        app.issue_create_labels_input.push(c);
+                        update_label_ac(app);
+                    }
+                    _ => {}
                 }
                 app.dirty = true;
             }
@@ -475,27 +490,42 @@ pub fn handle_key(app: &mut AppState, key: event::KeyEvent) -> bool {
                 crate::github::update_issue_from_tui(app);
                 app.dirty = true;
             }
+            KeyCode::Tab => {
+                if app.issue_edit_focus == 2 && !app.label_ac_list.is_empty() {
+                    app.label_ac_idx = (app.label_ac_idx + 1) % app.label_ac_list.len();
+                    let selected = &app.label_ac_list[app.label_ac_idx];
+                    app.issue_edit_labels_input =
+                        replace_label_current_token(&app.issue_edit_labels_input, selected);
+                } else {
+                    app.issue_edit_focus = (app.issue_edit_focus + 1) % 3;
+                }
+                app.dirty = true;
+            }
             KeyCode::Esc => {
                 app.mode = AppMode::Issues;
                 app.dirty = true;
             }
-            KeyCode::Tab => {
-                app.issue_edit_focus_title = !app.issue_edit_focus_title;
-                app.dirty = true;
-            }
             KeyCode::Backspace => {
-                if app.issue_edit_focus_title {
-                    app.issue_edit_title.pop();
-                } else {
-                    app.issue_edit_body.pop();
+                match app.issue_edit_focus {
+                    0 => { app.issue_edit_title.pop(); }
+                    1 => { app.issue_edit_body.pop(); }
+                    2 => {
+                        app.issue_edit_labels_input.pop();
+                        update_label_ac(app);
+                    }
+                    _ => {}
                 }
                 app.dirty = true;
             }
             KeyCode::Char(c) => {
-                if app.issue_edit_focus_title {
-                    app.issue_edit_title.push(c);
-                } else {
-                    app.issue_edit_body.push(c);
+                match app.issue_edit_focus {
+                    0 => { app.issue_edit_title.push(c); }
+                    1 => { app.issue_edit_body.push(c); }
+                    2 => {
+                        app.issue_edit_labels_input.push(c);
+                        update_label_ac(app);
+                    }
+                    _ => {}
                 }
                 app.dirty = true;
             }
@@ -1153,5 +1183,49 @@ pub fn handle_key(app: &mut AppState, key: event::KeyEvent) -> bool {
     }
 
     true
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Label Autocomplete Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get the current token being typed (text after the last comma, trimmed).
+fn get_label_current_token(input: &str) -> &str {
+    input.rsplit(',').next().map(|s| s.trim()).unwrap_or("")
+}
+
+/// Replace the current token (text after the last comma) with a new token.
+fn replace_label_current_token(input: &str, new_token: &str) -> String {
+    if let Some(last_comma) = input.rfind(',') {
+        let prefix = &input[..=last_comma];
+        format!("{} {}", prefix, new_token)
+    } else {
+        new_token.to_string()
+    }
+}
+
+/// Rebuild the label autocomplete list based on the current label input.
+fn update_label_ac(app: &mut AppState) {
+    let labels_input = match app.mode {
+        AppMode::IssueCreate => &app.issue_create_labels_input,
+        AppMode::IssueEdit => &app.issue_edit_labels_input,
+        _ => return,
+    };
+
+    let token = get_label_current_token(labels_input).to_lowercase();
+    if token.is_empty() {
+        app.label_ac_list.clear();
+        app.label_ac_idx = 0;
+        return;
+    }
+
+    let matches: Vec<String> = app.available_labels
+        .iter()
+        .filter(|l| l.to_lowercase().starts_with(&token))
+        .cloned()
+        .collect();
+
+    app.label_ac_list = matches;
+    app.label_ac_idx = 0;
 }
 

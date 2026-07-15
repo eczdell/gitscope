@@ -655,35 +655,93 @@ fn render_issue_create_view(frame: &mut Frame, area: Rect, app: &AppState) {
     lines.push(Line::raw(""));
 
     // Title input
+    let title_cursor = if app.issue_create_focus == 0 { "█" } else { " " };
     lines.push(ansi_to_line(&format!(
-        "  {}Title:{} {}{}",
+        "  {}Title:{} {} {}",
         ansi::BLD, ansi::RST,
-        app.issue_create_title,
-        if app.issue_create_focus_title { "█" } else { "" }
+        app.issue_create_title, title_cursor,
     )));
-
-    // Body input
-    lines.push(Line::raw(""));
-    let body_label = if app.issue_create_focus_title {
-        format!("  {}Body:{} (optional){}", ansi::BLD, ansi::DIM, ansi::RST)
-    } else {
-        format!("  {}Body:{} {}", ansi::BLD, ansi::RST, "█")
-    };
-    lines.push(ansi_to_line(&body_label));
-    if !app.issue_create_body.is_empty() {
-        for body_line in app.issue_create_body.lines().take(5) {
-            lines.push(ansi_to_line(&format!("  {}", body_line)));
-        }
-    } else if !app.issue_create_focus_title {
+    if app.issue_create_focus == 0 {
         lines.push(ansi_to_line(&format!(
             "  {}  {}",
             ansi::DIM, ansi::RST
         )));
     }
 
+    // Body input
+    lines.push(Line::raw(""));
+    if app.issue_create_focus == 1 {
+        lines.push(ansi_to_line(&format!(
+            "  {}Body:{} (optional){}",
+            ansi::BLD, ansi::DIM, ansi::RST
+        )));
+        if !app.issue_create_body.is_empty() {
+            for body_line in app.issue_create_body.lines().take(5) {
+                lines.push(ansi_to_line(&format!("  {}", body_line)));
+            }
+        } else {
+            lines.push(ansi_to_line(&format!(
+                "  {}  {}",
+                ansi::DIM, ansi::RST
+            )));
+        }
+    } else {
+        lines.push(ansi_to_line(&format!(
+            "  {}Body:{} {}",
+            ansi::BLD, ansi::RST,
+            if app.issue_create_body.is_empty() { "(optional)".to_string() } else { app.issue_create_body.clone() }
+        )));
+    }
+
+    // Labels input
+    lines.push(Line::raw(""));
+    let labels_display = if app.issue_create_labels_input.is_empty() {
+        "(comma-separated)".to_string()
+    } else {
+        app.issue_create_labels_input.clone()
+    };
+    let labels_cursor = if app.issue_create_focus == 2 { "█" } else { "" };
+    lines.push(ansi_to_line(&format!(
+        "  {}Labels:{} {}{}",
+        ansi::BLD, ansi::RST,
+        labels_display,
+        labels_cursor
+    )));
+    if !app.issue_create_labels_input.is_empty() {
+        let parsed: Vec<&str> = app.issue_create_labels_input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        if !parsed.is_empty() {
+            lines.push(ansi_to_line(&format!(
+                "  {}  → will apply: [{}]{}",
+                ansi::DIM,
+                parsed.join("]["),
+                ansi::RST
+            )));
+        }
+    }
+
+    // Label autocomplete suggestions
+    if !app.label_ac_list.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(ansi_to_line(&format!(
+            "  {}{} label(s) found{}",
+            ansi::DIM, app.label_ac_list.len(), ansi::RST
+        )));
+        for (idx, label) in app.label_ac_list.iter().enumerate() {
+            let marker = if idx == app.label_ac_idx {
+                format!("{}{}▸{} ", ansi::BLD, ansi::LGR, ansi::RST)
+            } else {
+                "  ".to_string()
+            };
+            lines.push(ansi_to_line(&format!(
+                "  {}{}{}",
+                marker, ansi::LBL, label,
+            )));
+        }
+    }
+
     lines.push(Line::raw(""));
     lines.push(ansi_to_line(&format!(
-        "  {}Tab{} = switch field  {}{}Enter{} = submit  {}Esc{} = cancel{}",
+        "  {}Tab{} = switch/cycle  {}{}Enter{} = submit  {}Esc{} = cancel{}",
         ansi::BLD, ansi::RST,
         ansi::BLD, ansi::LGR, ansi::RST,
         ansi::BLD, ansi::LRE, ansi::RST
@@ -718,22 +776,26 @@ fn render_issue_edit_view(frame: &mut Frame, area: Rect, app: &AppState) {
     lines.push(Line::raw(""));
 
     // Title input
-    let title_cursor = if app.issue_edit_focus_title { "█" } else { " " };
+    let title_cursor = if app.issue_edit_focus == 0 { "█" } else { " " };
     lines.push(ansi_to_line(&format!(
-        "  {}Title:{} {}{}{}",
+        "  {}Title:{} {} {}",
         ansi::BLD, ansi::RST,
-        app.issue_edit_title,
-        if app.issue_edit_focus_title { "█" } else { "" },
-        if app.issue_edit_focus_title { "" } else { title_cursor }
+        app.issue_edit_title, title_cursor,
     )));
-    if !app.issue_edit_focus_title {
-        // Show first few lines of body when body is focused
-        lines.push(Line::raw(""));
+    if app.issue_edit_focus == 0 {
         lines.push(ansi_to_line(&format!(
-            "  {}Body:{} {}{}",
+            "  {}  {}",
+            ansi::DIM, ansi::RST
+        )));
+    }
+
+    // Body input
+    lines.push(Line::raw(""));
+    if app.issue_edit_focus == 1 {
+        lines.push(ansi_to_line(&format!(
+            "  {}Body:{} {}",
             ansi::BLD, ansi::RST,
             app.issue_edit_body,
-            if !app.issue_edit_focus_title { "█" } else { "" }
         )));
         if app.issue_edit_body.is_empty() {
             lines.push(ansi_to_line(&format!(
@@ -746,11 +808,9 @@ fn render_issue_edit_view(frame: &mut Frame, area: Rect, app: &AppState) {
             }
         }
     } else {
-        lines.push(Line::raw(""));
         lines.push(ansi_to_line(&format!(
-            "  {}Body:{} (unchanged){}{}",
-            ansi::BLD, ansi::DIM, ansi::RST,
-            if !app.issue_edit_focus_title { " █" } else { "" }
+            "  {}Body:{} (type to update){}",
+            ansi::BLD, ansi::DIM, ansi::RST
         )));
         if !app.issue_edit_body.is_empty() {
             for body_line in app.issue_edit_body.lines().take(3) {
@@ -759,9 +819,66 @@ fn render_issue_edit_view(frame: &mut Frame, area: Rect, app: &AppState) {
         }
     }
 
+    // Labels input
+    lines.push(Line::raw(""));
+    if app.issue_edit_focus == 2 {
+        let labels_display = if app.issue_edit_labels_input.is_empty() {
+            "(comma-separated)".to_string()
+        } else {
+            app.issue_edit_labels_input.clone()
+        };
+        lines.push(ansi_to_line(&format!(
+            "  {}Labels:{} {}█",
+            ansi::BLD, ansi::RST,
+            labels_display,
+        )));
+        if !app.issue_edit_labels_input.is_empty() {
+            let parsed: Vec<&str> = app.issue_edit_labels_input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            if !parsed.is_empty() {
+                lines.push(ansi_to_line(&format!(
+                    "  {}  → will apply: [{}]{}",
+                    ansi::DIM,
+                    parsed.join("]["),
+                    ansi::RST
+                )));
+            }
+        }
+    } else {
+        let labels_display = if app.issue_edit_labels_input.is_empty() {
+            "(unchanged)".to_string()
+        } else {
+            app.issue_edit_labels_input.clone()
+        };
+        lines.push(ansi_to_line(&format!(
+            "  {}Labels:{} {}",
+            ansi::BLD, ansi::RST,
+            labels_display,
+        )));
+    }
+
+    // Label autocomplete suggestions
+    if !app.label_ac_list.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(ansi_to_line(&format!(
+            "  {}{} label(s) found{}",
+            ansi::DIM, app.label_ac_list.len(), ansi::RST
+        )));
+        for (idx, label) in app.label_ac_list.iter().enumerate() {
+            let marker = if idx == app.label_ac_idx {
+                format!("{}{}▸{} ", ansi::BLD, ansi::LGR, ansi::RST)
+            } else {
+                "  ".to_string()
+            };
+            lines.push(ansi_to_line(&format!(
+                "  {}{}{}",
+                marker, ansi::LBL, label,
+            )));
+        }
+    }
+
     lines.push(Line::raw(""));
     lines.push(ansi_to_line(&format!(
-        "  {}Tab{} = switch field  {}{}Enter{} = submit  {}Esc{} = cancel{}",
+        "  {}Tab{} = switch/cycle  {}{}Enter{} = submit  {}Esc{} = cancel{}",
         ansi::BLD, ansi::RST,
         ansi::BLD, ansi::LGR, ansi::RST,
         ansi::BLD, ansi::LRE, ansi::RST

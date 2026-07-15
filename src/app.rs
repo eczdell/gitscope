@@ -123,13 +123,15 @@ pub struct AppState {
 
     pub issue_create_title: String,
     pub issue_create_body: String,
-    pub issue_create_focus_title: bool,
+    pub issue_create_focus: u8, // 0=title, 1=body, 2=labels
+    pub issue_create_labels_input: String,
 
     // Issue edit view
     pub issue_edit_title: String,
     pub issue_edit_body: String,
     pub issue_edit_number: u64,
-    pub issue_edit_focus_title: bool,
+    pub issue_edit_focus: u8, // 0=title, 1=body, 2=labels
+    pub issue_edit_labels_input: String,
 
     // Issue detail view
     pub issue_detail_cursor: usize,
@@ -153,6 +155,11 @@ pub struct AppState {
     // Gist content view
     pub gist_content_lines: Vec<String>,
     pub gist_content_scroll: usize,
+
+    // Label autocomplete
+    pub available_labels: Vec<String>,
+    pub label_ac_list: Vec<String>,
+    pub label_ac_idx: usize,
 
     // Report view
     pub report_scroll: usize,

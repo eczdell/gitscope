@@ -310,13 +310,15 @@ fn main() -> io::Result<()> {
 
         issue_create_title: String::new(),
         issue_create_body: String::new(),
-        issue_create_focus_title: true,
+        issue_create_focus: 0,
+        issue_create_labels_input: String::new(),
 
         // Issue edit view
         issue_edit_title: String::new(),
         issue_edit_body: String::new(),
         issue_edit_number: 0,
-        issue_edit_focus_title: true,
+        issue_edit_focus: 0,
+        issue_edit_labels_input: String::new(),
 
         issue_detail_cursor: 0,
         issue_detail_scroll: 0,
@@ -349,6 +351,10 @@ fn main() -> io::Result<()> {
 
         gist_content_lines: Vec::new(),
         gist_content_scroll: 0,
+
+        available_labels: Vec::new(),
+        label_ac_list: Vec::new(),
+        label_ac_idx: 0,
     };
 
     // Auto-detect current repo and add it to the list

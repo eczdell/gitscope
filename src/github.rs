@@ -281,6 +281,47 @@ pub async fn create_issue(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Fetch Available Labels
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Fetch available labels for the current repo using `gh label list`.
+pub(crate) fn fetch_available_labels(app: &mut AppState) {
+    let (owner, repo) = if let Some(r) = detect_owner_repo() {
+        (r.owner, r.repo)
+    } else {
+        return;
+    };
+
+    let cmd = std::process::Command::new("gh")
+        .args([
+            "label",
+            "list",
+            "--repo",
+            &format!("{}/{}", owner, repo),
+            "--json",
+            "name",
+            "-q",
+            ".[].name",
+        ])
+        .output();
+
+    match cmd {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let labels: Vec<String> = stdout
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            app.available_labels = labels;
+        }
+        _ => {
+            app.available_labels.clear();
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Open Issues View (from TUI)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -784,10 +825,10 @@ pub fn open_gist_content(app: &mut AppState, gist_id: &str) {
 
     // Header with gist ID
     lines.push(format!(
-        "{}{} Gist Content{}   {}(id: {}){}{}{}  {}q{} back{}",
+        "{}{} Gist Content{}   {}(id: {}){}  {}q{} back",
         ansi::BLD, ansi::CYN, ansi::RST,
         ansi::DIM, gist_id, ansi::RST,
-        ansi::DIM, ansi::RST, ansi::DIM, ansi::RST
+        ansi::DIM, ansi::RST
     ));
     lines.push(format!(
         "{}{}{}",
@@ -1053,7 +1094,11 @@ fn format_issue_detail(app: &mut AppState, issue: &octocrab::models::issues::Iss
 pub fn start_create_issue(app: &mut AppState) {
     app.issue_create_title.clear();
     app.issue_create_body.clear();
-    app.issue_create_focus_title = true;
+    app.issue_create_focus = 0;
+    app.issue_create_labels_input.clear();
+    app.label_ac_list.clear();
+    app.label_ac_idx = 0;
+    fetch_available_labels(app);
     app.mode = crate::app::AppMode::IssueCreate;
 }
 
@@ -1076,8 +1121,15 @@ pub(crate) fn submit_issue_from_tui(app: &mut AppState) {
 
     let body = app.issue_create_body.trim().to_string();
 
+    // Parse labels from comma-separated input
+    let labels: Vec<String> = app.issue_create_labels_input
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-    let result = rt.block_on(create_issue_impl(&owner, &repo, &title, &body));
+    let result = rt.block_on(create_issue_impl(&owner, &repo, &title, &body, &labels));
 
     match result {
         Ok(num) => {
@@ -1085,6 +1137,7 @@ pub(crate) fn submit_issue_from_tui(app: &mut AppState) {
             app.msg_time = Some(std::time::Instant::now());
             app.issue_create_title.clear();
             app.issue_create_body.clear();
+            app.issue_create_labels_input.clear();
             app.mode = crate::app::AppMode::Issues;
             // Refresh the issues list
             open_issues_view(app);
@@ -1097,13 +1150,17 @@ pub(crate) fn submit_issue_from_tui(app: &mut AppState) {
 }
 
 /// Internal helper that creates an issue and returns the issue number
-async fn create_issue_impl(owner: &str, repo: &str, title: &str, body: &str) -> Result<u64, String> {
+async fn create_issue_impl(owner: &str, repo: &str, title: &str, body: &str, labels: &[String]) -> Result<u64, String> {
     let octo = build_octocrab()?;
 
-    let issue = octo
-        .issues(owner, repo)
-        .create(title)
-        .body(body)
+    let issues = octo.issues(owner, repo);
+    let mut builder = issues.create(title).body(body);
+
+    if !labels.is_empty() {
+        builder = builder.labels(labels.to_vec());
+    }
+
+    let issue = builder
         .send()
         .await
         .map_err(|e| format!("Failed to create issue: {}\n\nSet GITHUB_TOKEN or GH_TOKEN env var, or run: gh auth login", e))?;
@@ -1192,7 +1249,11 @@ pub(crate) fn start_edit_issue(app: &mut AppState) {
             app.issue_edit_number = issue_num;
             app.issue_edit_title = issue.title.clone();
             app.issue_edit_body = issue.body.unwrap_or_default();
-            app.issue_edit_focus_title = true;
+            app.issue_edit_focus = 0;
+            app.issue_edit_labels_input.clear();
+            app.label_ac_list.clear();
+            app.label_ac_idx = 0;
+            fetch_available_labels(app);
             app.mode = crate::app::AppMode::IssueEdit;
             app.dirty = true;
         }
@@ -1223,6 +1284,13 @@ pub(crate) fn update_issue_from_tui(app: &mut AppState) {
     let issue_num = app.issue_edit_number;
     let body = app.issue_edit_body.trim().to_string();
 
+    // Parse labels from comma-separated input
+    let labels: Vec<String> = app.issue_edit_labels_input
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
     let mut args = vec![
         "issue".to_string(),
         "edit".to_string(),
@@ -1236,6 +1304,12 @@ pub(crate) fn update_issue_from_tui(app: &mut AppState) {
     if !body.is_empty() {
         args.push("--body".to_string());
         args.push(body);
+    }
+
+    // Add labels via --add-label flag (comma-separated values)
+    if !labels.is_empty() {
+        args.push("--add-label".to_string());
+        args.push(labels.join(","));
     }
 
     let output = std::process::Command::new("gh")
