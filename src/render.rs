@@ -503,61 +503,6 @@ fn build_issues_sidebar(app: &AppState, vis: usize) -> Vec<String> {
         ansi::DIM, ansi::RST
     ));
 
-    // Recent issues header
-    lines.push(format!(
-        " {}{}RECENT{}",
-        ansi::BLD, ansi::LMA, ansi::RST,
-    ));
-
-    // Calculate how many issues fit in remaining space
-    let remaining = vis.saturating_sub(lines.len()).saturating_sub(2); // 2 for padding
-    let show_count = remaining.min(issues_summary.len());
-
-    for i in 0..show_count {
-        let (num, title, is_open, labels) = &issues_summary[i];
-        let state_dot = if *is_open {
-            format!("{}{}\u{25cf}{}", ansi::LGR, ansi::BLD, ansi::RST)
-        } else {
-            format!("{}{}\u{25cf}{}", ansi::LRE, ansi::BLD, ansi::RST)
-        };
-
-        // Show project status badge if available
-        let status_badge = app.issues_project_status.get(num).map(|s| {
-            let color = match s.to_lowercase().as_str() {
-                "backlog" => ansi::DIM,
-                "todo" => ansi::LBL,
-                "in-progress" | "in progress" => ansi::LYL,
-                "review-required" | "review required" => ansi::LMA,
-                "qa-ready" | "qa ready" => ansi::LCY,
-                "qa-passed" | "qa passed" | "qa-in-progress" | "qa in progress" => ansi::LGR,
-                "ready-for-release" | "ready for release" => ansi::LRE,
-                "done" | "closed" => ansi::DIM,
-                _ => ansi::DIM,
-            };
-            let truncated: String = s.chars().take(6).collect();
-            format!("{}{}[{}]{} ", ansi::BLD, color, truncated, ansi::RST)
-        }).unwrap_or_default();
-
-        // Show first label as a compact badge if it exists
-        let label_badge = labels.first().map(|l| {
-            let truncated: String = l.chars().take(8).collect();
-            format!("{}{}[{}]{} ", ansi::BLD, ansi::LBL, truncated, ansi::RST)
-        }).unwrap_or_default();
-
-        let title_with_badge = format!("{}{}{}", status_badge, label_badge, title);
-
-        // Truncate title + badges combined
-        let max_title_w = 22usize;
-        let title_trunc: String = title_with_badge.chars().take(max_title_w).collect();
-        let is_truncated = title_with_badge.len() > max_title_w;
-
-        let suffix = if is_truncated { "\u{2026}" } else { "" };
-        lines.push(format!(
-            " {} #{} {}{}{}",
-            state_dot, num, ansi::RST, title_trunc, suffix
-        ));
-    }
-
     if lines.len() < vis {
         // Separator before labels summary
         lines.push(format!(

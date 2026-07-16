@@ -30,8 +30,11 @@ pub fn show_msg(app: &mut AppState, msg: &str) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
-    // Ctrl-C always quits
+    // Ctrl-C or q always quits
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        return false;
+    }
+    if key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q') {
         return false;
     }
 

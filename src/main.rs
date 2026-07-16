@@ -469,6 +469,7 @@ fn main() -> io::Result<()> {
     }
 
     // Cleanup
+    terminal.clear()?;
     terminal.show_cursor()?;
     terminal::disable_raw_mode()?;
     Ok(())
