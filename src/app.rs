@@ -30,6 +30,7 @@ pub enum AppMode {
     Issues,
     IssuesFilter,
     IssuesLabelFilter,
+    IssuesProjectStatusFilter,
     IssueCreate,
     IssueDetail,
     IssueEdit,
@@ -124,6 +125,9 @@ pub struct AppState {
     pub issues_date_filter: String,  // "", "today", "week", "month", "year"
     pub issues_label_filter: String,
     pub issues_label_filter_input: String,
+    pub issues_project_status: std::collections::HashMap<u64, String>,
+    pub issues_project_status_filter: String,
+    pub issues_project_status_filter_input: String,
 
     pub issue_create_title: String,
     pub issue_create_body: String,

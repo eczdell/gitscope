@@ -389,22 +389,29 @@ fn build_issues_sidebar(app: &AppState, vis: usize) -> Vec<String> {
 
     let mut open_count = 0usize;
     let mut closed_count = 0usize;
-    let mut issues_summary: Vec<(u64, String, bool)> = Vec::new(); // (number, title, is_open)
+    let mut issues_summary: Vec<(u64, String, bool, Vec<String>)> = Vec::new(); // (number, title, is_open, labels)
+    let mut label_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
 
-    for line in data_lines {
-        let line = line.as_str();
-        // Skip label continuation lines
-        if line.starts_with("  ↳") {
+    let mut i = 0;
+    while i < data_lines.len() {
+        let line = data_lines[i].as_str();
+        // Strip ANSI codes for parsing
+        let clean_line = strip_ansi(line);
+        // Skip standalone label continuation lines
+        if clean_line.starts_with("  \u{21b3}") {
+            i += 1;
             continue;
         }
         // Parse: "  #N  OPEN   title..." or "  #N  CLOSED title..."
-        if let Some(rest) = line.strip_prefix("  #") {
+        if let Some(rest) = clean_line.strip_prefix("  #") {
             let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
             if let Ok(num) = num_str.parse::<u64>() {
                 let after_num = &rest[num_str.len()..]; // "  OPEN   ..." or "  CLOSED ..."
                 let trimmed = after_num.trim_start();
-                let is_open = trimmed.starts_with("OPEN");
-                let is_closed = trimmed.starts_with("CLOSED");
+                // Strip ANSI codes before checking state
+                let clean = strip_ansi(trimmed);
+                let is_open = clean.starts_with("OPEN");
+                let is_closed = clean.starts_with("CLOSED");
 
                 if is_open {
                     open_count += 1;
@@ -422,9 +429,44 @@ fn build_issues_sidebar(app: &AppState, vis: usize) -> Vec<String> {
                 };
                 // Strip ANSI codes and leading whitespace
                 let title_clean = strip_ansi(title_start).trim().to_string();
-                issues_summary.push((num, title_clean, is_open));
+
+                // Parse labels from the next line (if it's a labels continuation line)
+                let mut labels: Vec<String> = Vec::new();
+                if i + 1 < data_lines.len() {
+                    let next_line = data_lines[i + 1].as_str();
+                    // Strip ANSI codes before checking
+                    let next_clean = strip_ansi(next_line);
+                    if next_clean.starts_with("  \u{21b3} Labels:") || next_clean.starts_with("  \u{21b3} Labels:") {
+                        // Extract labels from format: "  ↳ Labels: [label1] [label2] ..."
+                        // Find content after "↳ Labels:"
+                        if let Some(labels_pos) = next_clean.find("\u{21b3} Labels:") {
+                            let after = labels_pos + 10; // skip "↳ Labels:"
+                            let labels_str = &next_clean[after..];
+                            for part in labels_str.split('[') {
+                                let part = part.trim();
+                                if !part.is_empty() {
+                                    if let Some(end) = part.find(']') {
+                                        let label = part[..end].trim().to_string();
+                                        if !label.is_empty() {
+                                            labels.push(label);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        i += 1; // skip the labels line
+                    }
+                }
+
+                // Count labels
+                for label in &labels {
+                    *label_counts.entry(label.clone()).or_insert(0) += 1;
+                }
+
+                issues_summary.push((num, title_clean, is_open, labels));
             }
         }
+        i += 1;
     }
 
     // State pill
@@ -449,7 +491,7 @@ fn build_issues_sidebar(app: &AppState, vis: usize) -> Vec<String> {
 
     // Open/Closed breakdown
     lines.push(format!(
-        "  {}{}●{} {}open   {}{}●{} {}closed{}",
+        "  {}{}\u{25cf}{} {}open   {}{}\u{25cf}{} {}closed{}",
         ansi::LGR, ansi::BLD, ansi::RST, open_count,
         ansi::LRE, ansi::BLD, ansi::RST, closed_count,
         ansi::RST
@@ -457,7 +499,7 @@ fn build_issues_sidebar(app: &AppState, vis: usize) -> Vec<String> {
 
     // Separator
     lines.push(format!(
-        " {}┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄{}",
+        " {}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}{}",
         ansi::DIM, ansi::RST
     ));
 
@@ -472,22 +514,75 @@ fn build_issues_sidebar(app: &AppState, vis: usize) -> Vec<String> {
     let show_count = remaining.min(issues_summary.len());
 
     for i in 0..show_count {
-        let (num, title, is_open) = &issues_summary[i];
+        let (num, title, is_open, labels) = &issues_summary[i];
         let state_dot = if *is_open {
-            format!("{}{}●{}", ansi::LGR, ansi::BLD, ansi::RST)
+            format!("{}{}\u{25cf}{}", ansi::LGR, ansi::BLD, ansi::RST)
         } else {
-            format!("{}{}●{}", ansi::LRE, ansi::BLD, ansi::RST)
+            format!("{}{}\u{25cf}{}", ansi::LRE, ansi::BLD, ansi::RST)
         };
-        let title_trunc: String = title.chars().take(18).collect();
-        if title.len() > 18 {
+
+        // Show project status badge if available
+        let status_badge = app.issues_project_status.get(num).map(|s| {
+            let color = match s.to_lowercase().as_str() {
+                "backlog" => ansi::DIM,
+                "todo" => ansi::LBL,
+                "in-progress" | "in progress" => ansi::LYL,
+                "review-required" | "review required" => ansi::LMA,
+                "qa-ready" | "qa ready" => ansi::LCY,
+                "qa-passed" | "qa passed" | "qa-in-progress" | "qa in progress" => ansi::LGR,
+                "ready-for-release" | "ready for release" => ansi::LRE,
+                "done" | "closed" => ansi::DIM,
+                _ => ansi::DIM,
+            };
+            let truncated: String = s.chars().take(6).collect();
+            format!("{}{}[{}]{} ", ansi::BLD, color, truncated, ansi::RST)
+        }).unwrap_or_default();
+
+        // Show first label as a compact badge if it exists
+        let label_badge = labels.first().map(|l| {
+            let truncated: String = l.chars().take(8).collect();
+            format!("{}{}[{}]{} ", ansi::BLD, ansi::LBL, truncated, ansi::RST)
+        }).unwrap_or_default();
+
+        let title_with_badge = format!("{}{}{}", status_badge, label_badge, title);
+
+        // Truncate title + badges combined
+        let max_title_w = 22usize;
+        let title_trunc: String = title_with_badge.chars().take(max_title_w).collect();
+        let is_truncated = title_with_badge.len() > max_title_w;
+
+        let suffix = if is_truncated { "\u{2026}" } else { "" };
+        lines.push(format!(
+            " {} #{} {}{}{}",
+            state_dot, num, ansi::RST, title_trunc, suffix
+        ));
+    }
+
+    if lines.len() < vis {
+        // Separator before labels summary
+        lines.push(format!(
+            " {}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}\u{2504}{}",
+            ansi::DIM, ansi::RST
+        ));
+
+        // Labels summary header
+        lines.push(format!(
+            " {}{}LABELS{} {}({}){}",
+            ansi::BLD, ansi::LYL, ansi::RST,
+            ansi::DIM, label_counts.len(), ansi::RST
+        ));
+
+        // Sort labels by count descending
+        let mut label_list: Vec<(String, usize)> = label_counts.into_iter().collect();
+        label_list.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let remaining_labels = vis.saturating_sub(lines.len()).saturating_sub(1);
+        for (label, count) in label_list.iter().take(remaining_labels) {
+            let truncated: String = label.chars().take(18).collect();
             lines.push(format!(
-                " {} #{} {} {}…{}",
-                state_dot, num, ansi::RST, title_trunc, ansi::RST
-            ));
-        } else {
-            lines.push(format!(
-                " {} #{} {} {}",
-                state_dot, num, ansi::RST, title_trunc
+                "   {}{}[{}]{} {}{}x{}",
+                ansi::BLD, ansi::LBL, truncated, ansi::RST,
+                ansi::GRY, count, ansi::RST
             ));
         }
     }

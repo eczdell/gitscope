@@ -75,6 +75,10 @@ pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
             handle_issues_label_filter_key(app, key);
             false
         }
+        AppMode::IssuesProjectStatusFilter => {
+            handle_issues_project_status_filter_key(app, key);
+            false
+        }
         AppMode::IssueDetail => {
             handle_issue_detail_key(app, key);
             false

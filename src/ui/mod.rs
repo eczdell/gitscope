@@ -319,6 +319,11 @@ fn render_filter_input(app: &AppState) -> Option<Line<'static>> {
             "  {}{}{}{}{}█ Esc to cancel  Enter to apply  (label filter){}",
             ansi::BLD, ansi::LGR, app.issues_label_filter_input, ansi::RST, ansi::DIM, ansi::RST
         )))
+    } else if app.mode == AppMode::IssuesProjectStatusFilter {
+        Some(ansi_to_line(&format!(
+            "  {}{}{}{}{}█ Esc to cancel  Enter to apply  (project status filter){}",
+            ansi::BLD, ansi::LGR, app.issues_project_status_filter_input, ansi::RST, ansi::DIM, ansi::RST
+        )))
     } else {
         None
     }
@@ -395,10 +400,11 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
     // Calculate vertical layout: status bar, filter area (optional), content, message (optional), command bar
     let mut constraints = vec![Constraint::Length(1)]; // status bar
 
-    // Filter input line (TreeFilter or IssuesFilter or IssuesLabelFilter mode)
+    // Filter input line (TreeFilter or IssuesFilter or IssuesLabelFilter or IssuesProjectStatusFilter mode)
     if app.mode == AppMode::TreeFilter
         || app.mode == AppMode::IssuesFilter
         || app.mode == AppMode::IssuesLabelFilter
+        || app.mode == AppMode::IssuesProjectStatusFilter
     {
         constraints.push(Constraint::Length(1));
     }
@@ -442,6 +448,7 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
     if app.mode == AppMode::TreeFilter
         || app.mode == AppMode::IssuesFilter
         || app.mode == AppMode::IssuesLabelFilter
+        || app.mode == AppMode::IssuesProjectStatusFilter
     {
         if let Some(line) = render_filter_input(app) {
             let paragraph = Paragraph::new(Text::from(vec![line]))
@@ -483,7 +490,7 @@ pub fn ui(frame: &mut Frame, app: &AppState) {
         }
         AppMode::Diff => render_diff_view(frame, chunks[chunk_idx], app),
         AppMode::Files => render_files_view(frame, chunks[chunk_idx], app),
-        AppMode::Issues | AppMode::IssuesFilter | AppMode::IssuesLabelFilter => {
+        AppMode::Issues | AppMode::IssuesFilter | AppMode::IssuesLabelFilter | AppMode::IssuesProjectStatusFilter => {
             render_issues_view(frame, chunks[chunk_idx], app)
         }
         AppMode::IssueCreate => render_issue_create_view(frame, chunks[chunk_idx], app),

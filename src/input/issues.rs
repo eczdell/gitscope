@@ -109,6 +109,11 @@ pub(crate) fn handle_issues_key(app: &mut AppState, key: KeyEvent) {
             app.mode = AppMode::IssuesLabelFilter;
             app.dirty = true;
         }
+        KeyCode::Char('p') => {
+            app.issues_project_status_filter_input.clear();
+            app.mode = AppMode::IssuesProjectStatusFilter;
+            app.dirty = true;
+        }
         KeyCode::Char('t') => {
             app.issues_date_filter = match app.issues_date_filter.as_str() {
                 "" => "today".to_string(),
@@ -211,6 +216,39 @@ pub(crate) fn handle_issues_label_filter_key(app: &mut AppState, key: KeyEvent) 
         }
         KeyCode::Char(c) => {
             app.issues_label_filter_input.push(c);
+            crate::github::apply_issues_filter(app);
+            app.dirty = true;
+        }
+        _ => {}
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issues Project Status Filter
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub(crate) fn handle_issues_project_status_filter_key(app: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            app.issues_project_status_filter = app.issues_project_status_filter_input.clone();
+            app.mode = AppMode::Issues;
+            crate::github::apply_issues_filter(app);
+            app.dirty = true;
+        }
+        KeyCode::Esc => {
+            app.issues_project_status_filter_input.clear();
+            app.issues_project_status_filter.clear();
+            app.mode = AppMode::Issues;
+            crate::github::apply_issues_filter(app);
+            app.dirty = true;
+        }
+        KeyCode::Backspace => {
+            app.issues_project_status_filter_input.pop();
+            crate::github::apply_issues_filter(app);
+            app.dirty = true;
+        }
+        KeyCode::Char(c) => {
+            app.issues_project_status_filter_input.push(c);
             crate::github::apply_issues_filter(app);
             app.dirty = true;
         }

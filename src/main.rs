@@ -309,6 +309,9 @@ fn main() -> io::Result<()> {
         issues_date_filter: String::new(),
         issues_label_filter: String::new(),
         issues_label_filter_input: String::new(),
+        issues_project_status: std::collections::HashMap::new(),
+        issues_project_status_filter: String::new(),
+        issues_project_status_filter_input: String::new(),
         issues_cursor: 0,
 
         issue_create_title: String::new(),

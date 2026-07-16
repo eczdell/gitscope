@@ -1,5 +1,7 @@
 use octocrab::params::State;
 use octocrab::Octocrab;
+use std::collections::HashMap;
+use std::process::Command;
 
 use crate::ansi;
 use crate::app::AppState;
@@ -282,6 +284,9 @@ pub fn open_issues_view(app: &mut AppState) {
     let state = app.issues_state.clone();
     let date_filter = app.issues_date_filter.clone();
 
+    // Fetch project status mapping (best-effort, silently ignore failures)
+    app.issues_project_status = fetch_project_status(&owner);
+
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     let result = rt.block_on(async {
         let octo = build_octocrab()?;
@@ -395,7 +400,27 @@ fn format_issues_lines(
             .map(|a| format!("{}@{}", ansi::LMA, a.login))
             .unwrap_or_else(|| format!("{}-{}", ansi::DIM, ansi::RST));
 
-        // Labels (compact, first 2 max)
+            // Project status badge
+                let status_badge = app
+                    .issues_project_status
+                    .get(&issue.number)
+                    .map(|s| {
+                        let color = match s.to_lowercase().as_str() {
+                            "backlog" => ansi::DIM,
+                            "todo" => ansi::LBL,
+                            "in-progress" | "in progress" => ansi::LYL,
+                            "review-required" | "review required" => ansi::LMA,
+                            "qa-ready" | "qa ready" => ansi::LCY,
+                            "qa-passed" | "qa passed" | "qa-in-progress" | "qa in progress" => ansi::LGR,
+                            "ready-for-release" | "ready for release" => ansi::LRE,
+                            "done" | "closed" => ansi::DIM,
+                            _ => ansi::DIM,
+                        };
+                        format!("{}{}[{}]{} ", ansi::BLD, color, s, ansi::RST)
+                    })
+                    .unwrap_or_default();
+        
+                // Labels (compact, first 2 max)
         let label_str: String = {
             let labels: Vec<String> = issue
                 .labels
@@ -414,8 +439,8 @@ fn format_issues_lines(
         };
 
         lines.push(format!(
-            "  {}#{}  {} {}{}{}  {}  {}by {}{}  {}",
-            ansi::LYL, num, state_label,
+                    "  {}#{}  {} {} {}{}{}  {}  {}by {}{}  {}",
+                    ansi::LYL, num, status_badge, state_label,
             ansi::BLD, ansi::WHT, title, ansi::RST,
             assignee_str,
             ansi::GRY, user, ansi::RST
@@ -446,6 +471,7 @@ fn format_issues_lines(
 pub fn apply_issues_filter(app: &mut AppState) {
     let filter = app.issues_filter_text.to_lowercase();
     let label_filter = app.issues_label_filter.to_lowercase();
+    let status_filter = app.issues_project_status_filter.to_lowercase();
 
     let mut filtered: Vec<String> = Vec::new();
     // Always keep the header lines (first 2 lines)
@@ -465,6 +491,16 @@ pub fn apply_issues_filter(app: &mut AppState) {
             let line_lower = line.to_lowercase();
             let label_match = line_lower.contains(&format!("[{}]", label_filter));
             if !label_match {
+                continue;
+            }
+        }
+
+        // Project status filter: check if the line contains the status badge "[status_name]"
+        if !status_filter.is_empty() {
+            let line_lower = line.to_lowercase();
+            // Status badges are rendered as [status_name] before state label
+            let status_match = line_lower.contains(&format!("[{}]", status_filter));
+            if !status_match {
                 continue;
             }
         }
@@ -1062,5 +1098,163 @@ fn delete_issue_impl(owner: &str, repo: &str, issue_number: u64) -> Result<(), S
     }
 
     Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GitHub Project Status
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Fetch project status for issues using the `gh` CLI.
+///
+/// Returns a HashMap mapping issue numbers to their project status field value
+/// (e.g. "backlog", "todo", "in-progress", "qa-ready", "qa-passed", etc.).
+pub fn fetch_project_status(owner: &str) -> HashMap<u64, String> {
+    let mut status_map: HashMap<u64, String> = HashMap::new();
+
+    // Step 1: List projects for the owner
+    let list_output = Command::new("gh")
+        .args(["project", "list", "--owner", owner, "--format", "json"])
+        .output();
+
+    let list_output = match list_output {
+        Ok(o) if o.status.success() => o,
+        _ => return status_map,
+    };
+
+    let list_stdout = String::from_utf8_lossy(&list_output.stdout);
+
+    // Parse project list JSON to find project numbers and their titles
+    let projects_json: serde_json::Value = match serde_json::from_str(&list_stdout) {
+        Ok(v) => v,
+        Err(_) => return status_map,
+    };
+
+    let projects = match projects_json.get("projects").and_then(|p| p.as_array()) {
+        Some(p) => p,
+        None => return status_map,
+    };
+
+    // If no projects found, try the "nodes" format
+    let projects: &[serde_json::Value] = if projects.is_empty() {
+        let empty: &[serde_json::Value] = &[];
+        projects_json
+            .get("nodes")
+            .and_then(|n| n.as_array())
+            .map(|v| v.as_slice())
+            .unwrap_or(empty)
+    } else {
+        projects.as_slice()
+    };
+
+    for project in projects {
+        let project_number = match project.get("number").and_then(|n| n.as_u64()) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        // Step 2: List items in this project
+        let item_output = Command::new("gh")
+            .args([
+                "project",
+                "item-list",
+                &project_number.to_string(),
+                "--owner",
+                owner,
+                "--format",
+                "json",
+            ])
+            .output();
+
+        let item_output = match item_output {
+            Ok(o) if o.status.success() => o,
+            _ => continue,
+        };
+
+        let item_stdout = String::from_utf8_lossy(&item_output.stdout);
+        let items_json: serde_json::Value = match serde_json::from_str(&item_stdout) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // Extract items - could be under "items" key or "nodes"
+        let items = items_json
+            .get("items")
+            .and_then(|i| i.as_array())
+            .or_else(|| items_json.get("nodes").and_then(|n| n.as_array()));
+
+        let items = match items {
+            Some(i) => i,
+            None => continue,
+        };
+
+        for item in items {
+            // Get the issue/PR number from content
+            let issue_number = item
+                .get("content")
+                .and_then(|c| c.get("number"))
+                .and_then(|n| n.as_u64());
+
+            let issue_number = match issue_number {
+                Some(n) => n,
+                None => continue,
+            };
+
+            // Find the status field value
+            let status = extract_status_from_item(item);
+
+            if let Some(status_name) = status {
+                status_map.insert(issue_number, status_name);
+            }
+        }
+    }
+
+    status_map
+}
+
+/// Extract the status field value from a project item JSON node.
+/// Looks for single select field values with field name "Status".
+fn extract_status_from_item(item: &serde_json::Value) -> Option<String> {
+    // Try fieldValues array format
+    if let Some(field_values) = item.get("fieldValues") {
+        // fieldValues could be an array or an object with "nodes"
+        let values: Vec<&serde_json::Value> = if let Some(arr) = field_values.as_array() {
+            arr.iter().collect()
+        } else if let Some(nodes) = field_values.get("nodes").and_then(|n| n.as_array()) {
+            nodes.iter().collect()
+        } else {
+            Vec::new()
+        };
+
+        for fv in &values {
+            // Check for single select field type
+            let typename = fv
+                .get("__typename")
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+            if !typename.contains("SingleSelect") && !typename.contains("Status") {
+                // Also check if this is a simple field value with a name
+            }
+
+            // Get the field name
+            let field_name = fv
+                .get("field")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+
+            // If this is the Status field, get its value
+            if field_name.to_lowercase() == "status" {
+                if let Some(name) = fv.get("name").and_then(|n| n.as_str()) {
+                    return Some(name.to_string());
+                }
+                // Check for optionId-based format
+                if let Some(option_id) = fv.get("optionId").and_then(|o| o.as_str()) {
+                    return Some(option_id.to_string());
+                }
+            }
+        }
+    }
+
+    None
 }
 
