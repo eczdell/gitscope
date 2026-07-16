@@ -16,11 +16,54 @@ Interactive Git tree visualizer (TUI) with GitHub CLI integration.
 
 ## Installation
 
+### Linux / macOS — One-liner install
+
 ```bash
-# Build from source
+curl -fsSL https://raw.githubusercontent.com/eczdell/gitscope/main/install.sh | bash
+```
+
+This downloads the latest binary for your platform and installs it to `/usr/local/bin/gitscope`.
+
+### Windows
+
+#### Option 1: Install via Cargo
+
+```powershell
+# Install Rust first: https://rustup.rs
+cargo install gitscope
+```
+
+#### Option 2: Build from source
+
+```powershell
+git clone https://github.com/eczdell/gitscope.git
+cd gitscope
+cargo build --release
+# The binary will be at target/release/gitscope.exe
+# Add it to your PATH manually
+```
+
+#### Option 3: Scoop (if available)
+
+```powershell
+scoop bucket add eczdell https://github.com/eczdell/gitscope.git
+scoop install gitscope
+```
+
+### Build from source (any platform)
+
+```bash
+# Requires Rust: https://rustup.rs
+cargo install gitscope
+
+# Or clone and build locally
+git clone https://github.com/eczdell/gitscope.git
+cd gitscope
 cargo build --release
 
 # The binary will be at target/release/gitscope
+# Move it to a directory in your PATH, e.g.:
+sudo cp target/release/gitscope /usr/local/bin/
 ```
 
 ### Prerequisites
